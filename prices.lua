@@ -26,11 +26,16 @@ do
 end
 
 -- Price a vendor pays for one unit. Second return is true when aux learned it
--- from a real merchant on this server rather than from a static database.
+-- from a real merchant on this server, or you set it with /vcraft price,
+-- rather than it coming from a static database.
 function vendor_sell(id)
 	local learned = info.merchant_info(id)
 	if learned then
 		return learned, true
+	end
+	local manual = db.prices[id]
+	if manual then
+		return manual, true
 	end
 	local shagu = _G.ShaguTweaks and _G.ShaguTweaks.SellValueDB and _G.ShaguTweaks.SellValueDB[id]
 	if shagu then

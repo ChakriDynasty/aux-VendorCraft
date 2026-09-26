@@ -45,6 +45,7 @@ function aux.handle.LOAD()
 	db.version = 1
 	db.chars = db.chars or {}
 	db.books = db.books or {}
+	db.prices = db.prices or {}
 	db.settings = db.settings or {}
 	settings = db.settings
 	for k, v in DEFAULTS do
@@ -119,6 +120,40 @@ function slash(msg)
 		character.recipes = {}
 		say('Forgot this character\'s recipes. Open your profession windows to read them again.')
 		request_plan()
+	elseif cmd == 'unpriced' then
+		local list = unpriced_recipes(rest)
+		say(format('%d recipes have no known vendor price for what they make%s:', getn(list), rest ~= '' and (' matching "' .. rest .. '"') or ''))
+		for i = 1, min(getn(list), 25) do
+			local r = list[i]
+			say(format('   %s%s - %s%s (item %d)', r.known and '' or '|cff999999', r.name, r.prof, r.skill and (' ' .. r.skill) or '', r.product))
+		end
+		if getn(list) > 25 then
+			say('   ...and ' .. (getn(list) - 25) .. ' more; add a word to narrow it, e.g. /vcraft unpriced survival')
+		end
+		if getn(list) > 0 then
+			say('aux learns a price when you open a merchant with the item in your bags; or set one with /vcraft price.')
+		end
+	elseif cmd == 'price' then
+		local id, amount
+		local _, link_end = strfind(rest, '|h|r')
+		if link_end then
+			id, amount = link_id(rest), strsub(rest, link_end + 1)
+		else
+			local _, _, n, a = strfind(rest, '^(%d+)%s*(.*)$')
+			id, amount = tonumber(n), a
+		end
+		amount = gsub(amount or '', '^%s+', '')
+		if id and amount == 'clear' then
+			db.prices[id] = nil
+			say('Removed your vendor price for ' .. item_name(id) .. '.')
+			request_plan()
+		elseif id and strfind(amount, '[gscGSC]') and money.from_string(amount) then
+			db.prices[id] = floor(money.from_string(amount))
+			say(format('Vendor price for %s set to %s each.', item_name(id), money_text(db.prices[id])))
+			request_plan()
+		else
+			say('Usage: /vcraft price <shift-click item, or item id> <price like 1s 20c> - or "clear" to remove it')
+		end
 	elseif cmd == 'max' then
 		local n = tonumber(rest)
 		if n and n >= 1 then
@@ -134,6 +169,8 @@ function slash(msg)
 		say('v' .. VERSION .. ' - open the auction house and use the Vendor tab in aux.')
 		say('/vcraft recipes - list the professions and recipes that have been read')
 		say('/vcraft why [name] - why a recipe is not in the list')
+		say('/vcraft unpriced [word] - recipes that cannot be rated because no vendor price is known')
+		say('/vcraft price <item> <price> - set a vendor price yourself, e.g. 1s 20c')
 		say('/vcraft max <n> - most crafts planned per recipe (now ' .. settings.max_crafts .. ')')
 		say('/vcraft forget - forget this character\'s recipes')
 		say('/vcraft clear - delete the stored auction house scan')

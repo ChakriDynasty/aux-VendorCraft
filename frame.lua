@@ -126,6 +126,10 @@ function switch_view()
 	if not busy() and view_summary() then
 		set_status(1, view_summary())
 	end
+	if view == 'other' and (unpriced_other or 0) > 0 and not unpriced_hint_shown then
+		unpriced_hint_shown = true
+		say(format('%d recipes you do not know could not be rated because no vendor price is known for what they make (the price tables predate newer Turtle items such as Survival). /vcraft unpriced lists them; /vcraft price sets a price.', unpriced_other))
+	end
 	refresh_controls()
 end
 

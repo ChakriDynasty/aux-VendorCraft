@@ -74,17 +74,19 @@ function discover_all()
 	for _ in recipes do
 		total = total + 1
 	end
-	local plans = {}
+	local plans, unpriced = {}, 0
 	for _, recipe in recipes do
 		done = done + 1
 		if math.mod(done, 25) == 0 then
 			set_status(done / total, format('Checking recipes you do not know %d / %d', done, total))
 		end
-		local plan = eval_recipe(recipe.name, recipe, sup)
+		local plan, _, no_price = eval_recipe(recipe.name, recipe, sup)
 		if plan and plan.profit >= settings.min_profit then
 			plan.discovered = true
 			plan.alt = crafters[recipe.product]
 			tinsert(plans, plan)
+		elseif no_price then
+			unpriced = unpriced + 1
 		end
 		spend(20)
 	end
@@ -92,7 +94,34 @@ function discover_all()
 		if x.profit ~= y.profit then return x.profit > y.profit end
 		return x.name < y.name
 	end)
-	return plans, sup, total
+	return plans, sup, total, unpriced
+end
+
+-- Recipes (known ones first) whose crafted item has no vendor price from
+-- any source, optionally filtered by recipe name or profession.
+function unpriced_recipes(filter)
+	filter = filter and strlower(filter) or ''
+	local list = {}
+	local function consider(name, recipe, known)
+		if recipe.product and not vendor_sell(recipe.product) then
+			local prof = recipe.prof or '?'
+			if filter == '' or strfind(strlower(name), filter, 1, true) or strfind(strlower(prof), filter, 1, true) then
+				tinsert(list, {name = name, prof = prof, skill = recipe.skill, product = recipe.product, known = known})
+			end
+		end
+	end
+	for name, recipe in character.recipes do
+		consider(name, recipe, true)
+	end
+	for _, recipe in unknown_recipes() or EMPTY do
+		consider(recipe.name, recipe, false)
+	end
+	sort(list, function(x, y)
+		if x.known ~= y.known then return x.known end
+		if x.prof ~= y.prof then return x.prof < y.prof end
+		return (x.skill or 0) < (y.skill or 0)
+	end)
+	return list
 end
 
 -- How this character stands with a discovered recipe's profession.

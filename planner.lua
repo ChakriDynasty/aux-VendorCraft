@@ -190,7 +190,11 @@ function eval_recipe(name, recipe, sup)
 		return nil, 'the crafted item is not known yet (reopen the profession window)'
 	end
 	local value, verified = vendor_sell(recipe.product)
-	if not value or value <= 0 then
+	if not value then
+		-- Third return marks recipes that could not be rated at all.
+		return nil, 'no vendor price is known for ' .. item_name(recipe.product, name) .. ' (see /vcraft price)', true
+	end
+	if value <= 0 then
 		return nil, 'vendors do not buy ' .. item_name(recipe.product, name)
 	end
 	local yield = recipe.made or 1
@@ -450,10 +454,10 @@ end
 
 function plan_everything()
 	local plans, skipped, sup, total = plan_all()
-	local other, other_sup, other_total = discover_all()
+	local other, other_sup, other_total, other_unpriced = discover_all()
 	return {
 		plans = plans, skipped = skipped, sup = sup, total = total,
-		other = other, other_sup = other_sup, other_total = other_total,
+		other = other, other_sup = other_sup, other_total = other_total, other_unpriced = other_unpriced,
 	}
 end
 
@@ -477,8 +481,11 @@ function summarize(run)
 	else
 		summary_mine = format('No profitable crafts in %d recipes - /vcraft why <name>', run.total)
 	end
+	unpriced_other = run.other_unpriced or 0
 	if not run.other then
 		summary_other = 'Enable the CraftTree addon for the recipe database'
+	elseif unpriced_other > 0 then
+		summary_other = format('%d profitable, %d unpriced', getn(run.other), unpriced_other)
 	elseif getn(run.other) > 0 then
 		summary_other = format('%d recipes you do not know could make a profit', getn(run.other))
 	else
