@@ -4,13 +4,18 @@ local aux = require 'aux'
 local info = require 'aux.util.info'
 
 do
-	local cache = {}
-	-- pfUI's table holds "sell,buy" strings per item id.
-	function pf_prices(id)
+	local caches = {}
+	-- pfUI's tables hold "sell,buy" strings per item id.
+	local function parse(prices, id)
+		local cache = caches[prices]
+		if not cache then
+			cache = {}
+			caches[prices] = cache
+		end
 		local entry = cache[id]
 		if entry == nil then
 			entry = false
-			local raw = _G.pfSellData and _G.pfSellData[id]
+			local raw = prices[id]
 			if raw then
 				local _, _, sell, buy = strfind(raw, '(%d+),(%d+)')
 				if sell then
@@ -23,27 +28,111 @@ do
 			return entry[1], entry[2]
 		end
 	end
+
+	-- pfUI's Turtle module puts its (newer) table in pfUI's private
+	-- environment; the global one is the vanilla table.
+	function pfui_turtle_prices()
+		local env = _G.pfUI and _G.pfUI.env
+		local prices = env and rawget(env, 'pfSellData')
+		if prices and prices ~= _G.pfSellData then return prices end
+	end
+
+	-- Sell and buy price from pfUI; third return is true for the Turtle table.
+	function pf_prices(id)
+		local turtle = pfui_turtle_prices()
+		if turtle then
+			local sell, buy = parse(turtle, id)
+			if sell then return sell, buy, true end
+		end
+		if _G.pfSellData then
+			return parse(_G.pfSellData, id)
+		end
+	end
 end
 
--- Price a vendor pays for one unit. Second return is true when aux learned it
--- from a real merchant on this server, or you set it with /vcraft price,
--- rather than it coming from a static database.
+-- ClassicAPI (a client DLL) exposes the sell price the server sent with each
+-- item: exact, and it covers custom items the static tables lack.
+function classic_api()
+	local api = _G.C_Item
+	return api and api.GetItemSellPriceByID and api.IsItemDataCachedByID and api.RequestLoadItemDataByID and true
+end
+
+do
+	-- Items not yet in the client cache are loaded a few at a time so the
+	-- server is never flooded; plans refresh as prices arrive.
+	local queue, queued, failed = {}, {}, {}
+	local next_request, arrived, last_refresh = 0, false, 0
+
+	function queue_item_load(id)
+		if queued[id] or failed[id] then return end
+		queued[id] = true
+		tinsert(queue, id)
+	end
+
+	function items_loading()
+		return getn(queue)
+	end
+
+	function aux.handle.LOAD()
+		if not classic_api() then return end
+		aux.event_listener('ITEM_DATA_LOAD_RESULT', function()
+			if arg1 and not arg2 then failed[arg1] = true end
+			arrived = true
+		end)
+		aux.event_listener('GET_ITEM_INFO_RECEIVED', function()
+			arrived = true
+		end)
+	end
+
+	on_tick(function()
+		if getn(queue) > 0 and GetTime() >= next_request then
+			next_request = GetTime() + .05
+			_G.C_Item.RequestLoadItemDataByID(tremove(queue, 1))
+		end
+		if arrived and (getn(queue) == 0 or GetTime() - last_refresh > 20) then
+			arrived, last_refresh = false, GetTime()
+			plan_stale = true
+		end
+	end)
+end
+
+-- Price a vendor pays for one unit. Second return is true when it comes from
+-- the game itself (ClassicAPI), a real merchant on this server (learned by
+-- aux) or /vcraft price, rather than a static table. Third return names the
+-- source.
 function vendor_sell(id)
+	if classic_api() then
+		if _G.C_Item.IsItemDataCachedByID(id) then
+			local price = _G.C_Item.GetItemSellPriceByID(id)
+			if price then
+				return price, true, 'game'
+			end
+		else
+			queue_item_load(id)
+		end
+	end
 	local learned = info.merchant_info(id)
 	if learned then
-		return learned, true
+		return learned, true, 'merchant'
 	end
 	local manual = db.prices[id]
 	if manual then
-		return manual, true
+		return manual, true, 'manual'
+	end
+	local octo = OCTO_PRICES[id]
+	if octo then
+		return octo[1], true, 'Octo database'
+	end
+	local pf, _, turtle = pf_prices(id)
+	if pf and turtle then
+		return pf, false, 'pfUI Turtle table'
 	end
 	local shagu = _G.ShaguTweaks and _G.ShaguTweaks.SellValueDB and _G.ShaguTweaks.SellValueDB[id]
 	if shagu then
-		return shagu, false
+		return shagu, false, 'ShaguTweaks'
 	end
-	local pf = pf_prices(id)
 	if pf then
-		return pf, false
+		return pf, false, 'pfUI vanilla table'
 	end
 end
 
@@ -69,6 +158,10 @@ function vendor_buy(id)
 		local _, pf = pf_prices(id)
 		if pf and pf > 0 then
 			return pf, false
+		end
+		local octo = OCTO_PRICES[id]
+		if octo and octo[2] and octo[2] > 0 then
+			return octo[2], false
 		end
 	end
 end

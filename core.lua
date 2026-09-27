@@ -120,6 +120,8 @@ function slash(msg)
 		character.recipes = {}
 		say('Forgot this character\'s recipes. Open your profession windows to read them again.')
 		request_plan()
+	elseif cmd == 'stats' then
+		stats_report()
 	elseif cmd == 'unpriced' then
 		local list = unpriced_recipes(rest)
 		say(format('%d recipes have no known vendor price for what they make%s:', getn(list), rest ~= '' and (' matching "' .. rest .. '"') or ''))
@@ -169,6 +171,7 @@ function slash(msg)
 		say('v' .. VERSION .. ' - open the auction house and use the Vendor tab in aux.')
 		say('/vcraft recipes - list the professions and recipes that have been read')
 		say('/vcraft why [name] - why a recipe is not in the list')
+		say('/vcraft stats - per profession, how many recipes were skipped and why')
 		say('/vcraft unpriced [word] - recipes that cannot be rated because no vendor price is known')
 		say('/vcraft price <item> <price> - set a vendor price yourself, e.g. 1s 20c')
 		say('/vcraft max <n> - most crafts planned per recipe (now ' .. settings.max_crafts .. ')')

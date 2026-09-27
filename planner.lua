@@ -186,17 +186,19 @@ end
 
 -- Best number of crafts for one recipe against the remaining supply.
 -- `limit` caps the number of crafts (used when re-planning while buying).
+-- When there is no plan, returns nil, a reason, a reason category ('price',
+-- 'novendor', 'mats', 'loss', 'gold' or 'unknown') and, for 'mats' caused
+-- by a reagent with no source at all, that reagent's id.
 function eval_recipe(name, recipe, sup, limit)
 	if not recipe.product then
-		return nil, 'the crafted item is not known yet (reopen the profession window)'
+		return nil, 'the crafted item is not known yet (reopen the profession window)', 'unknown'
 	end
 	local value, verified = vendor_sell(recipe.product)
 	if not value then
-		-- Third return marks recipes that could not be rated at all.
-		return nil, 'no vendor price is known for ' .. item_name(recipe.product, name) .. ' (see /vcraft price)', true
+		return nil, 'no vendor price is known for ' .. item_name(recipe.product, name) .. ' (see /vcraft price)', 'price'
 	end
 	if value <= 0 then
-		return nil, 'vendors do not buy ' .. item_name(recipe.product, name)
+		return nil, 'vendors do not buy ' .. item_name(recipe.product, name), 'novendor'
 	end
 	local yield = recipe.made or 1
 	local revenue = yield * value
@@ -208,17 +210,17 @@ function eval_recipe(name, recipe, sup, limit)
 		local reagent = recipe.reagents[i]
 		local id = reagent_id(reagent)
 		if not id then
-			return nil, 'unknown reagent ' .. (reagent.name or '?')
+			return nil, 'unknown reagent ' .. (reagent.name or '?'), 'unknown'
 		end
 		local cheapest = cheapest_unit(sup, id, 0, path)
 		if cheapest == INF then
-			return nil, 'no ' .. (reagent.name or item_name(id)) .. ' on the auction house'
+			return nil, 'no ' .. (reagent.name or item_name(id)) .. ' on the auction house', 'mats', id
 		end
 		parts[i] = {id = id, q = reagent.count, name = reagent.name, cheapest = cheapest}
 		min_cost = min_cost + cheapest * reagent.count
 	end
 	if revenue - min_cost < 1 then
-		return nil, 'even the cheapest mats cost more than the vendor pays'
+		return nil, 'even the cheapest mats cost more than the vendor pays', 'loss'
 	end
 
 	-- A unit priced above `cap` makes a craft lose money even when every
@@ -240,7 +242,7 @@ function eval_recipe(name, recipe, sup, limit)
 		nmax = min(nmax, 1)
 	end
 	if nmax < 1 then
-		return nil, 'not enough cheap mats for one craft'
+		return nil, 'not enough cheap mats for one craft', 'mats'
 	end
 	for i = 1, getn(ctxs) do
 		prepare(ctxs[i], max(0, nmax * ctxs[i].q - ctxs[i].owned))
@@ -271,9 +273,9 @@ function eval_recipe(name, recipe, sup, limit)
 	end
 	if best_n == 0 then
 		if broke and not profits[1] then
-			return nil, 'not enough gold for one craft'
+			return nil, 'not enough gold for one craft', 'gold'
 		end
-		return nil, 'no quantity makes a profit'
+		return nil, 'no quantity makes a profit', 'loss'
 	end
 
 	-- The estimate lets a craft step and a direct use count the same cheap
@@ -285,7 +287,7 @@ function eval_recipe(name, recipe, sup, limit)
 		n = n - 1
 	end
 	if not plan then
-		return nil, 'not enough mats once the ones shared between steps are counted'
+		return nil, 'not enough mats once the ones shared between steps are counted', 'mats'
 	end
 	plan.unlimited = not limited and plan.crafts == nmax
 	if profits[plan.crafts + 1] and profits[plan.crafts] then
@@ -451,18 +453,21 @@ function plan_all()
 	end
 	sort(names)
 	local total = getn(names)
-	local plans, skipped, current = {}, {}, {}
+	-- outcome[name] = {profession, category, missing reagent id} for /vcraft stats
+	local plans, skipped, current, outcome = {}, {}, {}, {}
 
 	for i = 1, total do
 		local name = names[i]
 		set_status(i / total, format('Checking recipes %d / %d', i, total))
-		local plan, why = eval_recipe(name, recipes[name], sup)
+		local plan, why, category, missing = eval_recipe(name, recipes[name], sup)
 		if plan and plan.profit >= settings.min_profit then
 			current[name] = plan
 		elseif plan then
 			skipped[name] = 'best profit ' .. money_text(plan.profit) .. ' is below your minimum profit'
+			outcome[name] = {recipes[name].prof, 'loss'}
 		else
 			skipped[name] = why
+			outcome[name] = {recipes[name].prof, category, missing}
 		end
 		spend(50)
 	end
@@ -482,25 +487,30 @@ function plan_all()
 		-- gold no longer covers, need a second look.
 		for name, plan in current do
 			if shares_reagent(plan, best) or plan.cash > sup.budget then
-				local again, why = eval_recipe(name, recipes[name], sup)
+				local again, why, category, missing = eval_recipe(name, recipes[name], sup)
 				if again and again.profit >= settings.min_profit then
 					current[name] = again
 				else
 					current[name] = nil
 					skipped[name] = again and 'what is left after better crafts is below your minimum profit' or why
+					outcome[name] = {recipes[name].prof, again and 'loss' or category, missing}
 				end
 			end
 		end
 	end
-	return plans, skipped, sup, total
+	for _, plan in plans do
+		outcome[plan.name] = {plan.recipe.prof, 'ok'}
+	end
+	return plans, skipped, sup, total, outcome
 end
 
 function plan_everything()
-	local plans, skipped, sup, total = plan_all()
-	local other, other_sup, other_total, other_unpriced = discover_all()
+	local plans, skipped, sup, total, outcome = plan_all()
+	local other, other_sup, other_total, other_unpriced, other_outcome, sources = discover_all()
 	return {
-		plans = plans, skipped = skipped, sup = sup, total = total,
+		plans = plans, skipped = skipped, sup = sup, total = total, outcome = outcome,
 		other = other, other_sup = other_sup, other_total = other_total, other_unpriced = other_unpriced,
+		other_outcome = other_outcome, sources = sources,
 	}
 end
 
@@ -558,6 +568,7 @@ on_tick(function()
 		plan_co = nil
 		results, last_skipped, last_supply = run.plans, run.skipped, run.sup
 		other_results, other_supply = run.other, run.other_sup
+		last_run = run
 		results_dirty = true
 		summarize(run)
 		set_status(1, view_summary())
