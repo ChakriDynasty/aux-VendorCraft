@@ -133,29 +133,40 @@ function switch_view()
 	refresh_controls()
 end
 
+-- Units crafted and batches, yellow when the recipe for that step is not known.
+function craft_text(reagent)
+	local craft = reagent.craft
+	if not craft then return gray('-') end
+	local text = format('%d (%dx)', craft.units, craft.crafts)
+	if not craft.known then return aux.color.yellow(text) end
+	return text
+end
+
 function update_details()
 	local rows = {}
 	local plan = selected_plan
 	local sup = current_supply()
-	for _, reagent in plan and plan.reagents or EMPTY do
+	each_node(plan and plan.reagents or EMPTY, function(reagent, depth)
 		local alts = 0
 		for _, n in sup and sup.alts[reagent.id] or EMPTY do
 			alts = alts + n
 		end
+		local indent = depth > 0 and (strrep('   ', depth) .. gray('> ')) or ''
 		tinsert(rows, {
 			cols = {
-				{value = colored_item_name(reagent.id, reagent.name) .. gray(' x' .. reagent.q)},
+				{value = indent .. colored_item_name(reagent.id, reagent.name) .. gray(' x' .. reagent.q)},
 				{value = tostring(reagent.need)},
-				{value = count_text(reagent.owned)},
+				{value = count_text(reagent.owned + (reagent.reused or 0))},
 				{value = reagent.ah_units > 0 and format('%d in %d', reagent.ah_units, getn(reagent.picks)) or gray('-')},
 				{value = reagent.ah_units > 0 and money_text(reagent.ah_cash / reagent.ah_units) or gray('-')},
 				{value = count_text(reagent.vendor)},
-				{value = count_text(reagent.leftover, aux.color.orange)},
+				{value = craft_text(reagent)},
+				{value = count_text(reagent.spare, aux.color.orange)},
 				{value = count_text(alts)},
 			},
 			reagent = reagent,
 		})
-	end
+	end)
 	details_listing:SetData(rows)
 end
 
@@ -207,13 +218,21 @@ function show_plan_tooltip(plan, owner)
 	if plan.ah_cash > 0 then add_line('Mats from auction house', money_text(plan.ah_cash)) end
 	if plan.vendor_cash > 0 then add_line('Mats from a vendor', money_text(plan.vendor_cash)) end
 	local owned_value, spare_value = 0, 0
-	for _, reagent in plan.reagents do
+	each_node(plan.reagents, function(reagent)
 		owned_value = owned_value + reagent.owned * reagent.salvage
-		spare_value = spare_value + reagent.leftover * reagent.salvage
-	end
+		spare_value = spare_value + reagent.spare * reagent.salvage
+	end)
 	if owned_value > 0 then add_line('Your own mats (at vendor value)', money_text(owned_value)) end
 	if spare_value > 0 then add_line('Spare mats (vendor value, credited)', money_text(spare_value)) end
 	add_line('Profit', money_text(plan.profit, aux.color.green))
+	if getn(plan.steps or EMPTY) > 0 then
+		add_line(' ')
+		add_line('Crafting steps:', nil, .7, .7, .7)
+		for _, step in craft_steps(plan) do
+			local learn = step.known == false and aux.color.yellow(' (recipe not known)') or ''
+			add_line('   ' .. step.n .. ' x ' .. step.name .. learn, nil, .9, .9, .9)
+		end
+	end
 	if plan.unlimited then
 		add_line('All mats come from vendors, so this is capped by your max crafts setting and gold.', nil, .7, .7, .7)
 	elseif plan.next_delta then
@@ -237,6 +256,9 @@ function show_reagent_tooltip(reagent, owner)
 		local sup = current_supply() or EMPTY
 		local mine, mail = (sup.mine or EMPTY)[reagent.id] or 0, (sup.mail or EMPTY)[reagent.id] or 0
 		add_line('From your mats', format('%d (bags/bank %d, mail %d)', reagent.owned, mine, mail))
+	end
+	if (reagent.reused or 0) > 0 then
+		add_line('Spare from another step', format('%d (bought for another line of this plan)', reagent.reused))
 	end
 	if reagent.ah_units > 0 then
 		add_line('From the auction house', format('%d in %d auctions, %s', reagent.ah_units, getn(reagent.picks), money_text(reagent.ah_cash)))
@@ -262,8 +284,19 @@ function show_reagent_tooltip(reagent, owner)
 	if reagent.vendor > 0 then
 		add_line('From a vendor', format('%d at %s', reagent.vendor, money_text(reagent.vendor_price or 0)))
 	end
-	if reagent.leftover > 0 then
-		add_line('Spare after crafting', format('%d (vendor pays %s each)', reagent.leftover, money_text(reagent.salvage)))
+	local craft = reagent.craft
+	if craft then
+		add_line('Crafted', format('%d from %d x %s', craft.units, craft.crafts, craft.name))
+		if craft.known then
+			add_line('You know this recipe.', nil, .5, 1, .5)
+		else
+			local needs = craft.prof and (craft.prof .. (craft.skill and (' ' .. craft.skill) or '')) or 'a recipe you do not know'
+			add_line('Needs ' .. needs .. ' to craft.', nil, 1, 1, 0)
+		end
+		add_line(format('Total cost of this reagent, crafting included: %s', money_text(reagent.net)), nil, .8, .8, .8)
+	end
+	if reagent.spare > 0 then
+		add_line('Spare after crafting', format('%d (vendor pays %s each)', reagent.spare, money_text(reagent.salvage)))
 	end
 	local sup = current_supply()
 	local alts = sup and sup.alts[reagent.id]
@@ -465,13 +498,14 @@ function aux.handle.INIT_UI()
 	details_listing = listing.new(details_panel)
 	details_listing:SetColInfo{
 		{name = 'Reagent', width = .27, align = 'LEFT'},
-		{name = 'Need', width = .07, align = 'CENTER'},
-		{name = 'Have', width = .07, align = 'CENTER'},
-		{name = 'Buy on AH', width = .14, align = 'CENTER'},
-		{name = 'Avg unit', width = .15, align = 'RIGHT'},
-		{name = 'Vendor', width = .09, align = 'CENTER'},
-		{name = 'Spare', width = .08, align = 'CENTER'},
-		{name = 'Alts', width = .13, align = 'CENTER'},
+		{name = 'Need', width = .06, align = 'CENTER'},
+		{name = 'Have', width = .06, align = 'CENTER'},
+		{name = 'Buy on AH', width = .12, align = 'CENTER'},
+		{name = 'Avg unit', width = .13, align = 'RIGHT'},
+		{name = 'Vendor', width = .07, align = 'CENTER'},
+		{name = 'Craft', width = .11, align = 'CENTER'},
+		{name = 'Spare', width = .07, align = 'CENTER'},
+		{name = 'Alts', width = .11, align = 'CENTER'},
 	}
 	details_listing:SetHandler('OnEnter', function(st, data, row) show_reagent_tooltip(data.reagent, row) end)
 	details_listing:SetHandler('OnLeave', function() GameTooltip:Hide() end)

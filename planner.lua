@@ -24,7 +24,7 @@ end
 -- AH listing trimmed to auctions cheaper than both the vendor and `cap`.
 -- `listing` must be sorted cheapest per unit first.
 function make_ctx(id, q, owned, listing, cap)
-	local ctx = {id = id, q = q, owned = owned or 0}
+	local ctx = {id = id, q = q, owned = owned or 0, cap = cap}
 	ctx.s = vendor_sell(id) or 0
 	ctx.u = vendor_buy(id)
 	local a, n, units = {}, 0, 0
@@ -185,7 +185,8 @@ function first_open(listing)
 end
 
 -- Best number of crafts for one recipe against the remaining supply.
-function eval_recipe(name, recipe, sup)
+-- `limit` caps the number of crafts (used when re-planning while buying).
+function eval_recipe(name, recipe, sup, limit)
 	if not recipe.product then
 		return nil, 'the crafted item is not known yet (reopen the profession window)'
 	end
@@ -200,6 +201,8 @@ function eval_recipe(name, recipe, sup)
 	local yield = recipe.made or 1
 	local revenue = yield * value
 
+	-- The recipe's own product is never crafted as one of its reagents.
+	local path = {[recipe.product] = true}
 	local parts, min_cost = {}, 0
 	for i = 1, getn(recipe.reagents) do
 		local reagent = recipe.reagents[i]
@@ -207,20 +210,11 @@ function eval_recipe(name, recipe, sup)
 		if not id then
 			return nil, 'unknown reagent ' .. (reagent.name or '?')
 		end
-		local owned = sup.owned[id] or 0
-		local listing = sup.auctions[id] or EMPTY
-		local cheapest = vendor_buy(id) or INF
-		if owned > 0 then
-			cheapest = min(cheapest, vendor_sell(id) or 0)
-		end
-		local first = first_open(listing)
-		if first then
-			cheapest = min(cheapest, first.b / first.c)
-		end
+		local cheapest = cheapest_unit(sup, id, 0, path)
 		if cheapest == INF then
 			return nil, 'no ' .. (reagent.name or item_name(id)) .. ' on the auction house'
 		end
-		parts[i] = {id = id, q = reagent.count, name = reagent.name, owned = owned, listing = listing, cheapest = cheapest}
+		parts[i] = {id = id, q = reagent.count, name = reagent.name, cheapest = cheapest}
 		min_cost = min_cost + cheapest * reagent.count
 	end
 	if revenue - min_cost < 1 then
@@ -229,11 +223,12 @@ function eval_recipe(name, recipe, sup)
 
 	-- A unit priced above `cap` makes a craft lose money even when every
 	-- other reagent comes at its cheapest, so pricier auctions are ignored.
-	local ctxs, nmax, limited = {}, settings.max_crafts, false
+	local ctxs, nmax, limited = {}, limit or settings.max_crafts, false
 	for i = 1, getn(parts) do
 		local p = parts[i]
 		local cap = (revenue - (min_cost - p.cheapest * p.q)) / p.q
-		local ctx = make_ctx(p.id, p.q, p.owned, p.listing, cap)
+		local listing = merged_listing(sup, p.id, settings.max_crafts * p.q, 0, path)
+		local ctx = make_ctx(p.id, p.q, sup.owned[p.id] or 0, listing, cap)
 		ctx.name = p.name
 		ctxs[i] = ctx
 		if not ctx.u then
@@ -281,6 +276,41 @@ function eval_recipe(name, recipe, sup)
 		return nil, 'no quantity makes a profit'
 	end
 
+	-- The estimate lets a craft step and a direct use count the same cheap
+	-- auction; resolving the full tree with reservations gives the real
+	-- numbers, stepping down if shared mats run out.
+	local plan, n = nil, best_n
+	while n >= 1 and not plan and best_n - n <= 20 do
+		plan = build_plan(name, recipe, sup, ctxs, n, value, verified, path)
+		n = n - 1
+	end
+	if not plan then
+		return nil, 'not enough mats once the ones shared between steps are counted'
+	end
+	plan.unlimited = not limited and plan.crafts == nmax
+	if profits[plan.crafts + 1] and profits[plan.crafts] then
+		plan.next_delta = profits[plan.crafts + 1] - profits[plan.crafts]
+	end
+	return plan
+end
+
+function build_plan(name, recipe, sup, ctxs, n, value, verified, path)
+	local log, entries = {}, {}
+	resolving = true
+	for i = 1, getn(ctxs) do
+		local ctx = ctxs[i]
+		local entry = resolve(sup, ctx.id, ctx.q, n * ctx.q, 0, path, log, ctx.name, ctx.cap)
+		if not entry then
+			entries = nil
+			break
+		end
+		tinsert(entries, entry)
+	end
+	resolving = false
+	undo_reservations(sup, log)
+	if not entries then return end
+
+	local yield = recipe.made or 1
 	local plan = {
 		name = name,
 		recipe = recipe,
@@ -288,70 +318,72 @@ function eval_recipe(name, recipe, sup)
 		value = value,
 		verified = verified,
 		yield = yield,
-		crafts = best_n,
-		unlimited = not limited and best_n == nmax,
-		revenue = best_n * revenue,
+		crafts = n,
+		revenue = n * yield * value,
 		cash = 0,
 		ah_cash = 0,
 		vendor_cash = 0,
 		leftover = 0,
-		reagents = {},
+		reagents = entries,
+		steps = {},
 	}
-	local net_total = 0
-	for i = 1, getn(ctxs) do
-		local ctx = ctxs[i]
-		local need = best_n * ctx.q
-		local net, cash, picks, owned_used, vendor_units, leftover = cover(ctx, need, true)
-		local ah_units, max_unit = 0, 0
-		for _, auction in ipairs(picks) do
-			ah_units = ah_units + auction.c
-			max_unit = max(max_unit, auction.b / auction.c)
+	local net = 0
+	for _, entry in ipairs(entries) do
+		plan.cash = plan.cash + entry.cash
+		net = net + entry.net
+	end
+	-- Spares that a later step reused are not left over; `spare` is what
+	-- each line really has left once the whole plan is crafted.
+	local reused = {}
+	each_node(entries, function(entry)
+		reused[entry.id] = (reused[entry.id] or 0) + entry.reused
+	end)
+	each_node(entries, function(entry)
+		local taken = min(entry.leftover, reused[entry.id])
+		reused[entry.id] = reused[entry.id] - taken
+		entry.spare = entry.leftover - taken
+		plan.ah_cash = plan.ah_cash + entry.ah_cash
+		plan.vendor_cash = plan.vendor_cash + entry.vendor * (entry.vendor_price or 0)
+		plan.leftover = plan.leftover + entry.spare
+		if entry.craft then
+			tinsert(plan.steps, entry.craft)
+			if not entry.craft.known then
+				plan.needs_recipes = true
+			end
 		end
-		local vendor_cash = vendor_units * (ctx.u or 0)
-		tinsert(plan.reagents, {
-			id = ctx.id,
-			name = ctx.name or item_name(ctx.id),
-			q = ctx.q,
-			need = need,
-			owned = owned_used,
-			vendor = vendor_units,
-			vendor_price = ctx.u,
-			picks = picks,
-			ah_units = ah_units,
-			ah_cash = cash - vendor_cash,
-			max_unit = max_unit,
-			leftover = leftover,
-			net = net,
-			salvage = ctx.s,
-		})
-		net_total = net_total + net
-		plan.cash = plan.cash + cash
-		plan.ah_cash = plan.ah_cash + cash - vendor_cash
-		plan.vendor_cash = plan.vendor_cash + vendor_cash
-		plan.leftover = plan.leftover + leftover
-	end
-	plan.profit = plan.revenue - net_total
-	if profits[best_n + 1] then
-		plan.next_delta = profits[best_n + 1] - best_profit
-	end
+	end)
+	plan.profit = plan.revenue - net
 	return plan
 end
 
 -- `market_only` ignores your own mats and gold: supply is the AH and vendors.
-function build_supply(recipes, market_only)
+-- `allow_database` lets craft trees use recipes this character does not know.
+-- `force_owned` counts this session's purchases even with "Use my mats" off.
+function build_supply(recipes, market_only, allow_database, force_owned)
+	local makers = build_makers(allow_database)
 	local ids = {}
-	for _, recipe in recipes do
+	local function add(recipe)
 		for _, reagent in recipe.reagents do
 			local id = reagent_id(reagent)
 			if id then ids[id] = true end
 		end
 	end
+	for _, recipe in recipes do
+		add(recipe)
+	end
+	for _, maker in makers do
+		add(maker.recipe)
+	end
 	local mine, alts, source = owned_snapshot()
 	local mail = mail_counts()
 	local owned = {}
-	if settings.use_owned and not market_only then
+	if not market_only then
 		for id in ids do
-			owned[id] = (mine[id] or 0) + (mail[id] or 0)
+			if settings.use_owned then
+				owned[id] = (mine[id] or 0) + (mail[id] or 0)
+			elseif force_owned then
+				owned[id] = character.mail.bought[id] or 0
+			end
 		end
 	end
 	load_book()
@@ -374,26 +406,37 @@ function build_supply(recipes, market_only)
 		alts = alts,
 		mail = mail,
 		owned_source = source,
+		makers = makers,
+		craft_cache = {},
+		cheap = {},
+		surplus = {},
 	}
 end
 
 function commit(plan, sup)
-	for _, reagent in plan.reagents do
-		for _, auction in reagent.picks do
+	each_node(plan.reagents, function(entry)
+		for _, auction in entry.picks do
 			auction.taken = true
 		end
-		if sup.owned[reagent.id] then
-			sup.owned[reagent.id] = sup.owned[reagent.id] - reagent.owned
+		if entry.owned > 0 then
+			sup.owned[entry.id] = (sup.owned[entry.id] or 0) - entry.owned
 		end
-	end
+	end)
 	sup.budget = sup.budget - plan.cash
+	-- Craft costs and price floors depend on what is left.
+	sup.craft_cache, sup.cheap = {}, {}
+end
+
+function plan_items(plan)
+	local ids = {}
+	each_node(plan.reagents, function(entry) ids[entry.id] = true end)
+	return ids
 end
 
 function shares_reagent(a, b)
-	for _, x in a.reagents do
-		for _, y in b.reagents do
-			if x.id == y.id then return true end
-		end
+	local ids = plan_items(a)
+	for id in plan_items(b) do
+		if ids[id] then return true end
 	end
 end
 

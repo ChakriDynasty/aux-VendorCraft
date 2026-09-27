@@ -68,7 +68,7 @@ end
 function discover_all()
 	local recipes = unknown_recipes()
 	if not recipes then return end
-	local sup = build_supply(recipes, true)
+	local sup = build_supply(recipes, true, true)
 	local crafters = alt_crafters()
 	local total, done = 0, 0
 	for _ in recipes do

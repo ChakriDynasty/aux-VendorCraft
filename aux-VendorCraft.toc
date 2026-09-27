@@ -11,6 +11,7 @@ prices.lua
 recipes.lua
 book.lua
 planner.lua
+tree.lua
 discover.lua
 buyer.lua
 frame.lua
