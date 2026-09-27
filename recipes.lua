@@ -3,8 +3,37 @@ module 'aux.tabs.vendorcraft'
 local aux = require 'aux'
 local info = require 'aux.util.info'
 
--- Recipes with a long cooldown can be crafted at most once per plan.
-COOLDOWN_PATTERNS = {'^Transmute', '^Mooncloth$', '^Refined Deeprock Salt$'}
+-- Day-or-week profession cooldowns. These are not vendor-flip crafts:
+-- one click then you wait, so they must not appear in the plan.
+-- Names from vanilla, Turtle, and Octo (Atlas-CFM / in-game).
+COOLDOWN_PATTERNS = {
+	'^Transmute',
+	'^Transmutation',
+	'^Mooncloth$',
+	'^Primal Mooncloth$',
+	'^Spellcloth$',
+	'^Shadowcloth$',
+	'^Refined Deeprock Salt$',
+}
+COOLDOWN_SPELLS = {
+	[11479] = true, -- Transmute: Iron to Gold
+	[11480] = true, -- Transmute: Mithril to Truesilver
+	[17187] = true, -- Transmute: Arcanite
+	[17559] = true, -- Transmute: Air to Fire
+	[17560] = true, -- Transmute: Fire to Earth
+	[17561] = true, -- Transmute: Earth to Water
+	[17562] = true, -- Transmute: Water to Air
+	[17563] = true, -- Transmute: Undeath to Water
+	[17564] = true, -- Transmute: Water to Undeath
+	[17565] = true, -- Transmute: Life to Earth
+	[17566] = true, -- Transmute: Earth to Life
+	[18560] = true, -- Mooncloth (the bolt, not Mooncloth gear)
+	[19566] = true, -- Salt Shaker / Refined Deeprock Salt
+	[19567] = true,
+	[25146] = true, -- Transmute: Elemental Fire
+	[57555] = true, -- Transmute: Elemental Earth (Turtle/Octo)
+	[57557] = true, -- Transmute: Elemental Water (Turtle/Octo)
+}
 
 -- Trade skill windows whose title differs from the skill line name.
 PROFESSION_ALIASES = {Smelting = 'Mining'}
@@ -33,9 +62,20 @@ do
 	end
 end
 
-function has_cooldown(name)
+function has_cooldown(name, spell)
+	if spell and COOLDOWN_SPELLS[spell] then return true end
+	if type(name) ~= 'string' or name == '' then return end
 	for _, pattern in COOLDOWN_PATTERNS do
 		if strfind(name, pattern) then return true end
+	end
+end
+
+function recipe_on_cooldown(name, recipe)
+	if recipe and recipe.cooldown then return true end
+	if has_cooldown(name) then return true end
+	if recipe then
+		if recipe.spell and has_cooldown(nil, recipe.spell) then return true end
+		if recipe.name and recipe.name ~= name and has_cooldown(recipe.name) then return true end
 	end
 end
 
@@ -67,7 +107,9 @@ function read_recipe(index, name, color, profession)
 		complete = complete or nil,
 		color = color,
 		tools = GetTradeSkillTools(index),
-		cooldown = has_cooldown(name) or nil,
+		-- Remaining CD from the game, plus the name list for when the
+		-- recipe is ready (1.12 returns nil then).
+		cooldown = has_cooldown(name) or GetTradeSkillCooldown(index) and true or nil,
 	}
 end
 

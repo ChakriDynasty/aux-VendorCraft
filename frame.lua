@@ -319,7 +319,6 @@ function show_plan_tooltip(plan, owner)
 	elseif plan.next_delta then
 		add_line('One more craft would change profit by ' .. money_text(plan.next_delta) .. '.', nil, .7, .7, .7)
 	end
-	if recipe.cooldown then add_line('Cooldown recipe: planned for one craft.', nil, 1, .5, .25) end
 	if recipe.tools then add_line('Requires: ' .. recipe.tools, nil, .7, .7, .7) end
 	if not plan.verified then
 		add_line('* Vendor price comes from a database. Open a merchant with the item in your bags to confirm it.', nil, .7, .7, .7)
@@ -421,10 +420,11 @@ function refresh_controls()
 			resume_button:Hide()
 		end
 	end
-	-- Recipes you do not know cannot be crafted, so there is nothing to buy for them.
-	local can_buy = view == 'mine' and not is_busy
+	-- Recipe scoring must not lock Buy or the craft-count box.
+	local can_buy = view == 'mine' and not scanning and not buying
 	if can_buy and selected_plan then buy_button:Enable() else buy_button:Disable() end
 	if can_buy and results and getn(results) > 0 then buy_all_button:Enable() else buy_all_button:Disable() end
+	if craft_box then craft_box:Enable() end
 	local line1, line2 = scan_summary()
 	scan_label:SetText(line1 .. '\n' .. gray(line2))
 end
@@ -599,6 +599,8 @@ function aux.handle.INIT_UI()
 	craft_box:SetPoint('LEFT', 48, 0)
 	craft_box:SetAlignment('RIGHT')
 	craft_box:SetNumeric(true)
+	craft_box:EnableMouse(true)
+	craft_box:SetFrameLevel((details_head:GetFrameLevel() or 1) + 8)
 	craft_box.enter = function() craft_box:ClearFocus() end
 	craft_box.focus_loss = function() apply_craft_box() end
 	local craft_label = gui.label(details_head, gui.font_size.small)

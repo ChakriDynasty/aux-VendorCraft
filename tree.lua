@@ -15,13 +15,13 @@ function build_makers(allow_database)
 	local makers = {}
 	if allow_database then
 		for _, recipe in unknown_recipes() or EMPTY do
-			if recipe.product and not recipe.cooldown and not makers[recipe.product] then
+			if recipe.product and not recipe_on_cooldown(recipe.name, recipe) and not makers[recipe.product] then
 				makers[recipe.product] = {name = recipe.name, recipe = recipe, known = false}
 			end
 		end
 	end
 	for name, recipe in character.recipes do
-		if recipe.product and not recipe.cooldown then
+		if recipe.product and not recipe_on_cooldown(name, recipe) then
 			makers[recipe.product] = {name = name, recipe = recipe, known = true}
 		end
 	end

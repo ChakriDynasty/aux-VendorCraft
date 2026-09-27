@@ -189,7 +189,8 @@ function atlas_recipe_list()
 					reagents = reagents,
 					prof = about.prof,
 					skill = about.skill,
-					cooldown = has_cooldown(name) or nil,
+					spell = row.spell,
+					cooldown = has_cooldown(name, row.spell) or nil,
 				}
 			end
 		end
@@ -325,7 +326,7 @@ function report_outcomes(title, outcomes)
 	end
 	for _, prof in ipairs(profs) do
 		local row = by_prof[prof]
-		local other = (row.novendor or 0) + (row.gold or 0) + (row.unknown or 0)
+		local other = (row.novendor or 0) + (row.gold or 0) + (row.unknown or 0) + (row.cooldown or 0)
 		say(format('   %s (%d): %d / %d / %d / %d / %d', prof, row.total, row.ok or 0, row.price or 0, row.mats or 0, row.loss or 0, other))
 	end
 	local list = {}
@@ -373,7 +374,7 @@ function stats_report()
 	else
 		say('No auction house scan yet.')
 	end
-	say('Per profession: profitable / no vendor price / a mat missing from the AH / not profitable / other')
+	say('Per profession: profitable / no vendor price / a mat missing from the AH / not profitable / other (incl. cooldown transmutes)')
 	report_outcomes('Your recipes', run.outcome)
 	report_outcomes('Recipes you do not know', run.other_outcome)
 end

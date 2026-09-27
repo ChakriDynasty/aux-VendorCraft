@@ -187,9 +187,12 @@ end
 -- Best number of crafts for one recipe against the remaining supply.
 -- `limit` caps the number of crafts (used when re-planning while buying).
 -- When there is no plan, returns nil, a reason, a reason category ('price',
--- 'novendor', 'mats', 'loss', 'gold' or 'unknown') and, for 'mats' caused
+-- 'novendor', 'mats', 'loss', 'gold', 'cooldown' or 'unknown') and, for 'mats' caused
 -- by a reagent with no source at all, that reagent's id.
 function eval_recipe(name, recipe, sup, limit)
+	if recipe_on_cooldown(name, recipe) then
+		return nil, 'cooldown recipe (transmute, mooncloth, refined salt) — skipped', 'cooldown'
+	end
 	if not recipe.product then
 		return nil, 'the crafted item is not known yet (reopen the profession window)', 'unknown'
 	end
@@ -237,9 +240,6 @@ function eval_recipe(name, recipe, sup, limit)
 			nmax = min(nmax, floor((ctx.owned + ctx.ah_units) / ctx.q))
 			limited = true
 		end
-	end
-	if recipe.cooldown then
-		nmax = min(nmax, 1)
 	end
 	if nmax < 1 then
 		return nil, 'not enough cheap mats for one craft', 'mats'
@@ -660,7 +660,7 @@ function view_summary()
 end
 
 on_tick(function()
-	if plan_requested and not plan_co and not buying and not scanning and db then
+	if plan_requested and not plan_co and not buying and not scanning and not buy_prompt and db then
 		plan_requested, plan_stale = false, false
 		plan_co = coroutine.create(plan_everything)
 	end

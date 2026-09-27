@@ -9,7 +9,32 @@ StaticPopupDialogs.AUX_VENDORCRAFT_BUY = {
 	button1 = 'Buy',
 	button2 = 'Cancel',
 	OnAccept = function() start_buying() end,
-	OnCancel = function() pending_plans = nil end,
+	OnCancel = function()
+		pending_plans = nil
+		buy_prompt = nil
+	end,
+	timeout = 0,
+	hideOnEscape = 1,
+	showAlert = 1,
+}
+
+StaticPopupDialogs.AUX_VENDORCRAFT_OWNED = {
+	text = '%s',
+	button1 = 'Use my mats',
+	button2 = 'Buy from AH',
+	OnAccept = function()
+		pending_plans = rebuild_plans_with_owned(pending_plans, pending_owned)
+		pending_owned = nil
+		show_buy_confirm(pending_plans)
+	end,
+	OnCancel = function()
+		pending_owned = nil
+		if pending_plans then
+			show_buy_confirm(pending_plans)
+		else
+			buy_prompt = nil
+		end
+	end,
 	timeout = 0,
 	hideOnEscape = 1,
 	showAlert = 1,
@@ -55,7 +80,111 @@ function plan_vendor(plan, into, crafts)
 end
 
 function request_buy(plans)
-	if busy() or not plans or getn(plans) == 0 then return end
+	if scanning or buying or not plans or getn(plans) == 0 then return end
+	cancel_plan()
+	pending_plans = plans
+	buy_prompt = true
+	local owned_lines, extra = collect_owned_offer(plans)
+	if getn(owned_lines) > 0 then
+		pending_owned = extra
+		local text
+		if getn(owned_lines) == 1 then
+			text = 'You have ' .. owned_lines[1] .. '.\nInclude these and not buy them from the AH?'
+		else
+			text = 'You have these mats:\n' .. table.concat(owned_lines, '\n') .. '\n\nInclude these and not buy them from the AH?'
+		end
+		StaticPopup_Show('AUX_VENDORCRAFT_OWNED', text)
+		return
+	end
+	show_buy_confirm(plans)
+end
+
+-- Mats already on this character or an alt that we are about to buy on the AH.
+function collect_owned_offer(plans)
+	local need, used = {}, {}
+	for _, plan in plans do
+		each_node(plan.reagents, function(entry)
+			if entry.ah_units > 0 then
+				need[entry.id] = (need[entry.id] or 0) + entry.ah_units
+			end
+			if (entry.owned or 0) > 0 then
+				used[entry.id] = (used[entry.id] or 0) + entry.owned
+			end
+		end)
+	end
+	local mine, alts = owned_snapshot()
+	local mail = mail_counts()
+	local me = UnitName('player') or '?'
+	local lines, extra = {}, {}
+	for id, ah in need do
+		local leftover = max(0, (mine[id] or 0) + (mail[id] or 0) - (used[id] or 0))
+		if leftover > 0 then
+			local use = min(leftover, ah - (extra[id] or 0))
+			if use > 0 then
+				extra[id] = (extra[id] or 0) + use
+				tinsert(lines, format('%dx %s on %s', use, item_name(id), me))
+			end
+		end
+		for name, n in alts[id] or EMPTY do
+			local remain = ah - (extra[id] or 0)
+			if remain > 0 and n > 0 then
+				local use = min(n, remain)
+				extra[id] = (extra[id] or 0) + use
+				tinsert(lines, format('%dx %s on %s', use, item_name(id), name))
+			end
+		end
+	end
+	sort(lines)
+	if getn(lines) > 8 then
+		local more = getn(lines) - 8
+		local short = {}
+		for i = 1, 8 do
+			tinsert(short, lines[i])
+		end
+		tinsert(short, '...' .. more .. ' more')
+		lines = short
+	end
+	return lines, extra
+end
+
+function rebuild_plans_with_owned(plans, extra)
+	if not plans or getn(plans) == 0 then return plans end
+	local recipes = {}
+	for i = 1, getn(plans) do
+		recipes[plans[i].name] = plans[i].recipe
+	end
+	local saved = settings.use_owned
+	settings.use_owned = true
+	local sup = build_supply(recipes, false, false, true)
+	settings.use_owned = saved
+	for id, n in extra or EMPTY do
+		sup.owned[id] = max(sup.owned[id] or 0, n)
+	end
+	local out = {}
+	for i = 1, getn(plans) do
+		local plan = plans[i]
+		local limit = plan.user_limited and plan.crafts or nil
+		local again = eval_recipe(plan.name, plan.recipe, sup, limit)
+		if again then
+			again.natural_crafts = plan.natural_crafts or plan.crafts
+			again.user_limited = plan.user_limited
+			again.discovered = plan.discovered
+			again.alt = plan.alt
+			commit(again, sup)
+			tinsert(out, again)
+		else
+			tinsert(out, plan)
+		end
+	end
+	return out
+end
+
+function show_buy_confirm(plans)
+	if not plans or getn(plans) == 0 then
+		buy_prompt = nil
+		pending_plans = nil
+		return
+	end
 	local auctions, ah_cash, profit, items, vendor = 0, 0, 0, {}, {}
 	for _, plan in plans do
 		profit = profit + plan.profit
@@ -69,11 +198,15 @@ function request_buy(plans)
 	if auctions == 0 then
 		say('Nothing to buy on the auction house for this; everything comes from your bags or a vendor.')
 		print_vendor_list(vendor)
+		buy_prompt = nil
+		pending_plans = nil
 		return
 	end
 	print_vendor_list(vendor)
 	if GetMoney() - settings.gold_reserve < ah_cash then
 		say(format('Not enough gold: the mats cost %s and you keep %s in reserve.', money_text(ah_cash), money_text(settings.gold_reserve)))
+		buy_prompt = nil
+		pending_plans = nil
 		return
 	end
 	local item_count = 0
@@ -119,7 +252,9 @@ end
 function start_buying()
 	local plans = pending_plans
 	pending_plans = nil
-	if not plans or busy() then return end
+	buy_prompt = nil
+	cancel_plan()
+	if not plans or scanning or buying then return end
 	buying = true
 	job = {
 		plans = plans,
