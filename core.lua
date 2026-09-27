@@ -3,7 +3,7 @@ module 'aux.tabs.vendorcraft'
 local aux = require 'aux'
 local money = require 'aux.util.money'
 
-M.VERSION = '0.2.0'
+M.VERSION = '0.3.0'
 
 DEFAULTS = {
 	min_profit = 500,
@@ -168,7 +168,7 @@ function slash(msg)
 		say('Cleared the stored auction house scan.')
 		request_plan()
 	else
-		say('v' .. VERSION .. ' - open the auction house and use the Vendor tab in aux.')
+		say('v' .. VERSION .. ' - aux tabs: Vendor (craft flips), Flip (AH below vendor), Mats (search and buy).')
 		say('/vcraft recipes - list the professions and recipes that have been read')
 		say('/vcraft why [name] - why a recipe is not in the list')
 		say('/vcraft stats - per profession, how many recipes were skipped and why')

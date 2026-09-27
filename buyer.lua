@@ -84,6 +84,10 @@ function request_buy(plans)
 	cancel_plan()
 	pending_plans = plans
 	buy_prompt = true
+	if plans[1] and plans[1].flip then
+		show_buy_confirm(plans)
+		return
+	end
 	local owned_lines, extra = collect_owned_offer(plans)
 	if getn(owned_lines) > 0 then
 		pending_owned = extra
@@ -149,6 +153,9 @@ end
 
 function rebuild_plans_with_owned(plans, extra)
 	if not plans or getn(plans) == 0 then return plans end
+	if plans[1] and plans[1].shop and plans[1].shop_needs then
+		return {build_shop_plan(plans[1].shop_needs, extra)}
+	end
 	local recipes = {}
 	for i = 1, getn(plans) do
 		recipes[plans[i].name] = plans[i].recipe
@@ -213,12 +220,28 @@ function show_buy_confirm(plans)
 	for _ in items do
 		item_count = item_count + 1
 	end
-	local text = format('Buy %d auctions of %d items for %s?\nExpected profit: %s\nMats are bought one complete craft at a time.', auctions, item_count, money_text(ah_cash), money_text(profit))
+	local shop_only = true
+	for _, plan in plans do
+		if not plan.shop then shop_only = false end
+	end
+	local text
+	if shop_only then
+		local vendor_total, mat_all = 0, 0
+		for _, plan in plans do
+			vendor_total = vendor_total + (plan.revenue or 0)
+			mat_all = mat_all + (plan.all_cost or plan.cash or 0)
+		end
+		text = format('Buy %d auctions of %d items for %s?\nVendor pays %s for the finished items.\nMats if you buy all: %s.\nSpread vs vendor: %s.', auctions, item_count, money_text(ah_cash), money_text(vendor_total), money_text(mat_all), money_text(profit))
+	else
+		text = format('Buy %d auctions of %d items for %s?\nExpected profit: %s\nMats are bought one complete craft at a time.', auctions, item_count, money_text(ah_cash), money_text(profit))
+	end
 	local steps = {}
 	for _, plan in plans do
-		for _, step in craft_steps(plan) do
-			if not step.final then
-				tinsert(steps, format('Craft %d x %s first (from the mats below, not the intermediate)', step.n, step.name))
+		if not plan.flip and not plan.shop then
+			for _, step in craft_steps(plan) do
+				if not step.final then
+					tinsert(steps, format('Craft %d x %s first (from the mats below, not the intermediate)', step.n, step.name))
+				end
 			end
 		end
 	end
@@ -496,11 +519,13 @@ end
 function finish_plan()
 	local plan = job.plan
 	local n = job.complete_crafts or 0
-	if plan and n > 0 then
+	if plan and n > 0 and not plan.flip and not plan.shop then
 		for _, step in craft_steps(plan, n) do
 			tinsert(job.crafts, step)
 		end
 		plan_vendor(plan, job.vendor, n)
+	elseif plan and plan.flip then
+		tinsert(job.notes, format('Sell %s to a vendor.', plan.name))
 	end
 	next_plan()
 end

@@ -177,6 +177,7 @@ function finish_scan(complete)
 	else
 		set_status(1, format('Scan stopped at page %d of %d - press Resume to continue', (book_meta.next_page or 0) + 1, book_meta.total_pages or 0))
 	end
+	flip_dirty = true
 	if not suppress_plan then
 		request_plan()
 	end
