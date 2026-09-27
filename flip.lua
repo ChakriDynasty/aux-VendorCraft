@@ -137,9 +137,9 @@ end
 
 function refresh_flip_controls()
 	if not flip_buy then return end
-	local can = not scanning and not buying and selected_flip
+	local can = not buying and selected_flip
 	if can then flip_buy:Enable() else flip_buy:Disable() end
-	if not scanning and not buying and flip_rows and getn(flip_rows) > 0 then
+	if not buying and flip_rows and getn(flip_rows) > 0 then
 		flip_buy_all:Enable()
 	else
 		flip_buy_all:Disable()

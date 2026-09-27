@@ -18,9 +18,9 @@ NEED_COLUMNS = {
 	{name = 'Reagent', width = .34, align = 'LEFT'},
 	{name = 'Need', width = .08, align = 'CENTER'},
 	{name = 'Have', width = .08, align = 'CENTER'},
-	{name = 'Missing', width = .10, align = 'CENTER'},
+	{name = 'Craft', width = .14, align = 'CENTER'},
 	{name = 'AH', width = .20, align = 'CENTER'},
-	{name = 'Alts', width = .20, align = 'LEFT'},
+	{name = 'Alts', width = .16, align = 'LEFT'},
 }
 
 function tab.OPEN()
@@ -101,20 +101,178 @@ function alt_text(id)
 	return table.concat(parts, ', ')
 end
 
--- AH + unlimited-vendor cost of `count` units from the last scan.
--- Fourth return is false when the scan cannot cover that many.
-function shop_buy_cost(id, count)
-	if not count or count < 1 then return 0, 0, 0, true end
-	local list = book_listing(id)
-	local copy = {}
-	for i = 1, getn(list) do
-		copy[i] = {c = list[i].c, b = list[i].b}
+-- One shared AH copy for a search. Each quote clears `taken` before it runs.
+function shop_market()
+	if not shop_market_cache then
+		shop_market_cache = build_supply(EMPTY, true, true)
 	end
-	local ctx = make_ctx(id, 1, 0, copy, nil)
-	local _, spent, chosen, _, vendor = cover(ctx, count, true)
-	if not chosen then return nil, nil, 0, false end
-	local vendor_cash = (vendor or 0) * (ctx.u or 0)
-	return (spent or 0) + vendor_cash, spent or 0, vendor or 0, true
+	return shop_market_cache
+end
+
+function clear_shop_taken(auctions)
+	for _, list in auctions or EMPTY do
+		for i = 1, getn(list) do
+			list[i].taken = nil
+		end
+	end
+end
+
+function shop_owned(bag, extra)
+	local owned = {}
+	local mine, mail = bag and bag.mine, bag and bag.mail
+	if not bag then
+		mine = owned_snapshot()
+		mail = mail_counts()
+	end
+	for id, n in mine or EMPTY do
+		owned[id] = (owned[id] or 0) + n
+	end
+	for id, n in mail or EMPTY do
+		owned[id] = (owned[id] or 0) + n
+	end
+	for id, n in extra or EMPTY do
+		owned[id] = (owned[id] or 0) + n
+	end
+	return owned
+end
+
+-- Buy `missing` units from the AH, or an unlimited vendor when that is cheaper
+-- or the item is not listed. Marks the chosen auctions taken so another step
+-- cannot spend them again.
+function shop_buy_leaf(sup, node, missing)
+	node.cash = 0
+	node.net = (node.owned or 0) * (node.salvage or 0)
+	if missing < 1 then return end
+	local src = sup.auctions[node.id] or EMPTY
+	local ctx = make_ctx(node.id, 1, 0, src, nil)
+	local _, spent, chosen, _, vendor, left = cover(ctx, missing, true)
+	local got = missing
+	if not chosen and not ctx.u and ctx.ah_units and ctx.ah_units > 0 then
+		got = min(missing, ctx.ah_units)
+		_, spent, chosen, _, vendor, left = cover(ctx, got, true)
+		if chosen then node.short = missing - got end
+	end
+	if not chosen then
+		node.short = missing
+		return
+	end
+	node.picks = chosen
+	node.vendor = vendor or 0
+	node.vendor_price = ctx.u
+	node.leftover = left or 0
+	node.spare = left or 0
+	node.ah_cash = spent or 0
+	node.cash = (spent or 0) + node.vendor * (ctx.u or 0)
+	node.net = node.net + node.cash
+	for i = 1, getn(chosen) do
+		local auction = chosen[i]
+		node.ah_units = node.ah_units + auction.c
+		node.max_unit = max(node.max_unit, auction.b / auction.c)
+		auction.taken = true
+	end
+end
+
+-- Expand a crafted reagent into its own reagents, down to mats that are not
+-- themselves crafted. Leather grades and cooldown recipes are already left
+-- out of the maker list, same as the Vendor tab.
+function shop_node(sup, id, per, need, depth, path, name)
+	local have = sup.owned[id] or 0
+	local use = min(need, have)
+	if use > 0 then sup.owned[id] = have - use end
+	local missing = need - use
+	local node = {
+		id = id,
+		name = name or item_name(id),
+		q = per,
+		need = need,
+		owned = use,
+		have = have,
+		reused = 0,
+		vendor = 0,
+		leftover = 0,
+		spare = 0,
+		salvage = vendor_sell(id) or 0,
+		picks = {},
+		ah_units = 0,
+		ah_cash = 0,
+		max_unit = 0,
+		cash = 0,
+		net = 0,
+	}
+	local maker = sup.makers[id]
+	-- An unlimited vendor (thread, dye, vials, salt) is a basic mat: buy it
+	-- there, or on the AH only when the auction is cheaper. Do not craft it.
+	local from_vendor = vendor_buy(id)
+	-- Deeper than the Vendor tab on purpose: a shopping list should reach the
+	-- ore, cloth, or herb, not stop on the bar or bolt.
+	if missing <= 0 or from_vendor or not maker or depth >= 8 or path[id] then
+		if missing > 0 then shop_buy_leaf(sup, node, missing) end
+		return node
+	end
+	local recipe = maker.recipe
+	local yield = recipe.made or 1
+	local batches = ceil(missing / yield)
+	local children, cash = {}, 0
+	path[id] = true
+	for i = 1, getn(recipe.reagents or EMPTY) do
+		local reagent = recipe.reagents[i]
+		local rid = reagent_id(reagent)
+		if rid then
+			local child = shop_node(sup, rid, reagent.count or 1, batches * (reagent.count or 1), depth + 1, path, reagent.name)
+			tinsert(children, child)
+			cash = cash + (child.cash or 0)
+		end
+	end
+	path[id] = nil
+	node.cash = cash
+	node.net = use * node.salvage + cash
+	node.craft = {
+		name = maker.name,
+		known = maker.known,
+		prof = recipe.prof,
+		skill = recipe.skill,
+		crafts = batches,
+		yield = yield,
+		units = batches * yield,
+		reagents = children,
+	}
+	node.spare = batches * yield - missing
+	node.leftover = node.spare
+	return node
+end
+
+function expand_shop(sup, target, qty)
+	local entries, path = {}, {}
+	qty = qty or 1
+	if target.kind == 'recipe' and target.recipe then
+		if target.recipe.product then path[target.recipe.product] = true end
+		for i = 1, getn(target.recipe.reagents or EMPTY) do
+			local reagent = target.recipe.reagents[i]
+			local rid = reagent_id(reagent)
+			if rid then
+				tinsert(entries, shop_node(sup, rid, reagent.count or 1, qty * (reagent.count or 1), 0, path, reagent.name))
+			end
+		end
+	elseif target.id then
+		tinsert(entries, shop_node(sup, target.id, 1, qty, 0, path, target.name))
+	end
+	return entries
+end
+
+function root_cash(entries)
+	local cash = 0
+	for i = 1, getn(entries) do
+		cash = cash + (entries[i].cash or 0)
+	end
+	return cash
+end
+
+function tree_has_short(entries)
+	local short = false
+	each_node(entries, function(entry)
+		if entry.short and entry.short > 0 then short = true end
+	end)
+	return short
 end
 
 function shop_product(target, qty)
@@ -135,36 +293,24 @@ end
 
 function shop_quote(target, qty, bag)
 	qty = qty or 1
-	local mine, mail
-	if bag then
-		mine, mail = bag.mine, bag.mail
-	else
-		mine = owned_snapshot()
-		mail = mail_counts()
-	end
-	local needs = build_shop_needs(target, qty)
-	local all_cost, missing_cost, all_known, miss_known = 0, 0, true, true
-	for i = 1, getn(needs) do
-		local need = needs[i]
-		local have = (mine[need.id] or 0) + (mail[need.id] or 0)
-		local missing = max(0, need.count - have)
-		local full, _, _, ok = shop_buy_cost(need.id, need.count)
-		if ok and full then
-			all_cost = all_cost + full
-		else
-			all_known = false
-		end
-		if missing > 0 then
-			local miss, _, _, mok = shop_buy_cost(need.id, missing)
-			if mok and miss then
-				missing_cost = missing_cost + miss
-			else
-				miss_known = false
-			end
-		end
-	end
+	local market = shop_market()
+	clear_shop_taken(market.auctions)
+	local all_entries = expand_shop({
+		owned = {},
+		auctions = market.auctions,
+		makers = market.makers,
+	}, target, qty)
+	clear_shop_taken(market.auctions)
+	local miss_entries = expand_shop({
+		owned = shop_owned(bag),
+		auctions = market.auctions,
+		makers = market.makers,
+	}, target, qty)
+	clear_shop_taken(market.auctions)
 	local product, units, value, verified, source = shop_product(target, qty)
 	local revenue = value * units
+	local all_known = not tree_has_short(all_entries)
+	local miss_known = not tree_has_short(miss_entries)
 	return {
 		product = product,
 		units = units,
@@ -172,11 +318,11 @@ function shop_quote(target, qty, bag)
 		verified = verified,
 		source = source,
 		revenue = revenue,
-		all_cost = all_cost,
-		missing_cost = missing_cost,
+		all_cost = root_cash(all_entries),
+		missing_cost = root_cash(miss_entries),
 		all_known = all_known,
 		miss_known = miss_known,
-		profit = value > 0 and all_known and (revenue - all_cost) or nil,
+		profit = value > 0 and all_known and (revenue - root_cash(all_entries)) or nil,
 	}
 end
 
@@ -252,103 +398,58 @@ function set_shop_quote(quote)
 	end
 end
 
-function build_shop_needs(target, qty)
+function build_shop_plan(target, qty, extra, ignore_owned)
 	qty = qty or 1
-	local needs = {}
-	if target.kind == 'item' and target.id then
-		tinsert(needs, {id = target.id, count = qty, name = target.name})
-		return needs
+	target = target or EMPTY
+	local market = shop_market()
+	clear_shop_taken(market.auctions)
+	local all_entries = expand_shop({
+		owned = {},
+		auctions = market.auctions,
+		makers = market.makers,
+	}, target, qty)
+	local all_cost = root_cash(all_entries)
+	local all_known = not tree_has_short(all_entries)
+	clear_shop_taken(market.auctions)
+	local owned = {}
+	if not ignore_owned then
+		owned = shop_owned(nil, extra)
 	end
-	local recipe = target.recipe
-	if not recipe then return needs end
-	for i = 1, getn(recipe.reagents or EMPTY) do
-		local reagent = recipe.reagents[i]
-		local id = reagent_id(reagent)
-		if id then
-			tinsert(needs, {id = id, count = (reagent.count or 1) * qty, name = reagent.name or item_name(id)})
-		end
-	end
-	return needs
-end
-
-function build_shop_plan(needs, extra)
-	extra = extra or EMPTY
-	local mine, alts = owned_snapshot()
-	local mail = mail_counts()
-	local entries, cash, ah_cash, all_cost, all_known = {}, 0, 0, 0, true
-	for i = 1, getn(needs) do
-		local need = needs[i]
-		local have = (mine[need.id] or 0) + (mail[need.id] or 0) + (extra[need.id] or 0)
-		local missing = max(0, need.count - have)
-		local listing = book_listing(need.id)
-		local copy = {}
-		for j = 1, getn(listing) do
-			copy[j] = {c = listing[j].c, b = listing[j].b}
-		end
-		local ctx = make_ctx(need.id, 1, 0, copy, nil)
-		local picks, vendor_units, leftover, line_cash, line_ah, max_unit = {}, 0, 0, 0, 0, 0
-		if missing > 0 then
-			local _, spent, chosen, _, vendor, left = cover(ctx, missing, true)
-			picks = chosen or {}
-			vendor_units = vendor or 0
-			leftover = left or 0
-			line_cash = spent or 0
-			for j = 1, getn(picks) do
-				line_ah = line_ah + picks[j].c
-				max_unit = max(max_unit, picks[j].b / picks[j].c)
-			end
-		end
-		local full_cash, _, _, full_ok = shop_buy_cost(need.id, need.count)
-		if full_ok and full_cash then
-			all_cost = all_cost + full_cash
-		else
-			all_known = false
-		end
-		cash = cash + line_cash
-		ah_cash = ah_cash + line_cash
-		tinsert(entries, {
-			id = need.id,
-			name = need.name or item_name(need.id),
-			q = need.count,
-			need = need.count,
-			owned = min(have, need.count),
-			have = have,
-			reused = 0,
-			vendor = vendor_units,
-			vendor_price = ctx.u,
-			leftover = leftover,
-			spare = leftover,
-			salvage = ctx.s,
-			picks = picks,
-			ah_units = line_ah,
-			ah_cash = line_cash,
-			max_unit = max_unit,
-			alts = alts[need.id],
-		})
-	end
-	local title = shop_target and shop_target.name or 'Shopping'
-	local product, units, value, verified = 0, 1, 0, nil
-	if shop_target then
-		product, units, value, verified = shop_product(shop_target, shop_qty())
-	end
+	local entries = expand_shop({
+		owned = owned,
+		auctions = market.auctions,
+		makers = market.makers,
+	}, target, qty)
+	clear_shop_taken(market.auctions)
+	local ah_cash, vendor_cash = 0, 0
+	each_node(entries, function(entry)
+		ah_cash = ah_cash + (entry.ah_cash or 0)
+		vendor_cash = vendor_cash + (entry.vendor or 0) * (entry.vendor_price or 0)
+	end)
+	local product, units, value, verified, source = shop_product(target, qty)
 	local revenue = value * units
+	local recipe = target.recipe or {product = product, reagents = EMPTY, made = 1}
 	return {
-		name = title,
-		product = product,
-		crafts = 1,
+		name = target.name or 'Shopping',
+		product = product or 0,
+		crafts = qty,
 		yield = units,
 		value = value,
 		verified = verified,
+		source = source,
 		revenue = revenue,
-		cash = cash,
+		cash = root_cash(entries),
 		ah_cash = ah_cash,
+		vendor_cash = vendor_cash,
 		all_cost = all_cost,
 		all_known = all_known,
+		miss_known = not tree_has_short(entries),
 		profit = value > 0 and all_known and (revenue - all_cost) or 0,
 		leftover = 0,
 		shop = true,
-		shop_needs = needs,
-		recipe = {product = product, reagents = EMPTY, made = 1},
+		shop_target = target,
+		shop_qty = qty,
+		recipe = recipe,
 		reagents = entries,
 		steps = EMPTY,
 	}
@@ -361,8 +462,8 @@ function show_shop_matches(hits)
 	shop_plan = nil
 	set_shop_quote(nil)
 	if shop_listing then shop_listing:SetColInfo(MATCH_COLUMNS) end
-	local mine = owned_snapshot()
-	local bag = {mine = mine, mail = mail_counts()}
+	shop_market_cache = build_supply(EMPTY, true, true)
+	local bag = {mine = owned_snapshot(), mail = mail_counts()}
 	local qty = shop_qty()
 	local rows = {}
 	for i = 1, min(getn(hits), 80) do
@@ -387,8 +488,9 @@ function show_shop_matches(hits)
 		})
 	end
 	shop_listing:SetData(rows)
+	shop_market_cache = nil
 	if shop_status then
-		shop_status:SetText(getn(hits) == 0 and 'No recipe or item matches. Shift-click an item or type a name.' or format('%d matches — Vendor is sell price, Mats is AH/vendor buy cost, Spread is vendor minus mats.', getn(hits)))
+		shop_status:SetText(getn(hits) == 0 and 'No recipe or item matches. Shift-click an item or type a name.' or format('%d matches — Mats is the cost of the basic materials, not the direct reagents.', getn(hits)))
 	end
 end
 
@@ -397,40 +499,57 @@ function open_shop_target(target)
 	shop_target = target
 	shop_matches = nil
 	if shop_listing then shop_listing:SetColInfo(NEED_COLUMNS) end
-	local needs = build_shop_needs(target, shop_qty())
-	shop_plan = build_shop_plan(needs)
+	shop_market_cache = build_supply(EMPTY, true, true)
+	shop_plan = build_shop_plan(target, shop_qty())
+	shop_market_cache = nil
 	local rows = {}
-	for i = 1, getn(shop_plan.reagents) do
-		local r = shop_plan.reagents[i]
-		local missing = max(0, r.need - r.owned)
-		local ah = r.ah_units > 0 and format('%d (%s)', r.ah_units, money_text(r.ah_cash)) or gray('-')
+	each_node(shop_plan.reagents, function(r, depth)
+		local indent = depth > 0 and (strrep('  ', depth) .. gray('> ')) or ''
+		local ah = gray('-')
+		if r.short and r.short > 0 then
+			ah = aux.color.orange('short ' .. r.short)
+		elseif r.ah_units > 0 then
+			ah = format('%d (%s)', r.ah_units, money_text(r.ah_cash))
+		end
 		if r.vendor > 0 then
-			ah = ah .. ' + vendor ' .. r.vendor
+			local bit = format('vendor %d (%s)', r.vendor, money_text(r.vendor * (r.vendor_price or 0)))
+			ah = r.ah_units > 0 and (ah .. ' + ' .. bit) or bit
 		end
 		tinsert(rows, {
 			cols = {
-				{value = colored_item_name(r.id, r.name) .. gray(' x' .. r.need)},
+				{value = indent .. colored_item_name(r.id, r.name)},
 				{value = tostring(r.need)},
 				{value = count_text(r.have)},
-				{value = missing > 0 and aux.color.orange(missing) or gray('-')},
+				{value = craft_text(r)},
 				{value = ah},
 				{value = alt_text(r.id)},
 			},
 			reagent = r,
 		})
-	end
+	end)
 	shop_listing:SetData(rows)
-	local quote = shop_quote(target, shop_qty())
-	set_shop_quote(quote)
+	set_shop_quote({
+		units = shop_plan.yield,
+		value = shop_plan.value,
+		verified = shop_plan.verified,
+		source = shop_plan.source,
+		revenue = shop_plan.revenue,
+		all_cost = shop_plan.all_cost,
+		missing_cost = shop_plan.cash,
+		all_known = shop_plan.all_known,
+		miss_known = shop_plan.miss_known,
+		profit = shop_plan.value > 0 and shop_plan.all_known and (shop_plan.revenue - shop_plan.all_cost) or nil,
+	})
 	if shop_status then
-		local missing = 0
-		for i = 1, getn(shop_plan.reagents) do
-			missing = missing + max(0, shop_plan.reagents[i].need - shop_plan.reagents[i].owned)
-		end
-		if missing == 0 then
-			shop_status:SetText('You already have everything for ' .. target.name .. '.')
+		local buy = 0
+		each_node(shop_plan.reagents, function(r)
+			if not r.craft then buy = buy + max(0, r.need - (r.owned or 0)) end
+		end)
+		if buy == 0 then
+			shop_status:SetText('You already have the basic mats for ' .. target.name .. '.')
 		else
-			shop_status:SetText(format('%s x%d — missing %d. Buy missing, or use mats you already have.', target.name, shop_qty(), missing))
+			local vendor_note = (shop_plan.vendor_cash or 0) > 0 and (' Vendor mats ' .. money_text(shop_plan.vendor_cash) .. '.') or ''
+			shop_status:SetText(format('%s x%d — %d basic mats to buy.%s Indented rows are what you craft along the way.', target.name, shop_qty(), buy, vendor_note))
 		end
 	end
 end
@@ -448,8 +567,9 @@ end
 
 function refresh_shop_controls()
 	if not shop_buy then return end
-	local can = not scanning and not buying and shop_plan and shop_plan.ah_cash
-	if can and shop_plan.ah_cash > 0 then shop_buy:Enable() else shop_buy:Disable() end
+	-- A scan or a zero quote must not lock Buy. Quantity can still be changed,
+	-- and the click rebuilds the calculation for whatever quantity is set.
+	if shop_target and not buying then shop_buy:Enable() else shop_buy:Disable() end
 end
 
 function aux.handle.INIT_UI()
@@ -543,6 +663,10 @@ function aux.handle.INIT_UI()
 	gui.set_size(shop_buy, 110, 24)
 	shop_buy:SetText('Buy missing')
 	shop_buy:SetScript('OnClick', function()
-		if shop_plan then request_buy({shop_plan}) end
+		if buying or not shop_target then return end
+		shop_market_cache = build_supply(EMPTY, true, true)
+		shop_plan = build_shop_plan(shop_target, shop_qty())
+		shop_market_cache = nil
+		request_buy({shop_plan})
 	end)
 end

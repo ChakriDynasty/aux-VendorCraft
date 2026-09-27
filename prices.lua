@@ -234,6 +234,18 @@ function item_quality(id)
 	return item_info and item_info.quality or 1
 end
 
+-- Bagshui replaces each character's numeric total with a tooltip string
+-- ("Bags: 2 + Bank: 5 = 7"). The last number is the count.
+function catalog_count(value)
+	if type(value) == 'number' then return value end
+	if type(value) ~= 'string' then return end
+	local n
+	for num in string.gfind(value, '(%d+)') do
+		n = tonumber(num)
+	end
+	return n
+end
+
 -- Counts on this character (bags + bank) and per alt, from Bagshui's catalog.
 -- Falls back to this character's bags when Bagshui is not running.
 function owned_snapshot()
@@ -246,10 +258,11 @@ function owned_snapshot()
 		for _, name in ipairs(realm_totals._sortedCharacterList) do
 			local counts = realm_totals['==Total' .. name]
 			if counts then
-				for item_string, count in counts do
+				for item_string, raw in counts do
 					local _, _, id = strfind(item_string, '^item:(%d+)')
 					id = tonumber(id)
-					if id and type(count) == 'number' and count > 0 then
+					local count = catalog_count(raw)
+					if id and count and count > 0 then
 						if name == me then
 							mine[id] = (mine[id] or 0) + count
 						else

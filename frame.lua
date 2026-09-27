@@ -420,8 +420,8 @@ function refresh_controls()
 			resume_button:Hide()
 		end
 	end
-	-- Recipe scoring must not lock Buy or the craft-count box.
-	local can_buy = view == 'mine' and not scanning and not buying
+	-- A scan or recipe scoring must not lock Buy or the craft-count box.
+	local can_buy = view == 'mine' and not buying
 	if can_buy and selected_plan then buy_button:Enable() else buy_button:Disable() end
 	if can_buy and results and getn(results) > 0 then buy_all_button:Enable() else buy_all_button:Disable() end
 	local line1, line2 = scan_summary()

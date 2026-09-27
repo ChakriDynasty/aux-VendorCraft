@@ -29,6 +29,11 @@ StaticPopupDialogs.AUX_VENDORCRAFT_OWNED = {
 	end,
 	OnCancel = function()
 		pending_owned = nil
+		local plan = pending_plans and pending_plans[1]
+		if plan and plan.shop then
+			-- Buy the mats even when Bagshui already has them.
+			pending_plans = {build_shop_plan(plan.shop_target, plan.shop_qty, nil, true)}
+		end
 		if pending_plans then
 			show_buy_confirm(pending_plans)
 		else
@@ -80,7 +85,7 @@ function plan_vendor(plan, into, crafts)
 end
 
 function request_buy(plans)
-	if scanning or buying or not plans or getn(plans) == 0 then return end
+	if buying or not plans or getn(plans) == 0 then return end
 	cancel_plan()
 	pending_plans = plans
 	buy_prompt = true
@@ -103,8 +108,52 @@ function request_buy(plans)
 	show_buy_confirm(plans)
 end
 
+-- Mats the shopping list can skip because this character or a Bagshui alt already has them.
+function collect_shop_owned(plan)
+	local mine, alts = owned_snapshot()
+	local mail = mail_counts()
+	local me = UnitName('player') or '?'
+	local need = {}
+	each_node(plan.reagents, function(entry)
+		if (entry.need or 0) > 0 then
+			need[entry.id] = (need[entry.id] or 0) + entry.need
+		end
+	end)
+	local lines, extra = {}, {}
+	for id, count in need do
+		local room = count
+		local mine_n = min(room, (mine[id] or 0) + (mail[id] or 0))
+		if mine_n > 0 then
+			room = room - mine_n
+			tinsert(lines, format('%dx %s on %s', mine_n, item_name(id), me))
+		end
+		for name, n in alts[id] or EMPTY do
+			if room > 0 and n > 0 then
+				local use = min(n, room)
+				room = room - use
+				extra[id] = (extra[id] or 0) + use
+				tinsert(lines, format('%dx %s on %s', use, item_name(id), name))
+			end
+		end
+	end
+	sort(lines)
+	if getn(lines) > 8 then
+		local more = getn(lines) - 8
+		local short = {}
+		for i = 1, 8 do
+			tinsert(short, lines[i])
+		end
+		tinsert(short, '...' .. more .. ' more')
+		lines = short
+	end
+	return lines, extra
+end
+
 -- Mats already on this character or an alt that we are about to buy on the AH.
 function collect_owned_offer(plans)
+	if plans[1] and plans[1].shop then
+		return collect_shop_owned(plans[1])
+	end
 	local need, used = {}, {}
 	for _, plan in plans do
 		each_node(plan.reagents, function(entry)
@@ -153,8 +202,8 @@ end
 
 function rebuild_plans_with_owned(plans, extra)
 	if not plans or getn(plans) == 0 then return plans end
-	if plans[1] and plans[1].shop and plans[1].shop_needs then
-		return {build_shop_plan(plans[1].shop_needs, extra)}
+	if plans[1] and plans[1].shop and plans[1].shop_target then
+		return {build_shop_plan(plans[1].shop_target, plans[1].shop_qty, extra)}
 	end
 	local recipes = {}
 	for i = 1, getn(plans) do
@@ -237,7 +286,7 @@ function show_buy_confirm(plans)
 	end
 	local steps = {}
 	for _, plan in plans do
-		if not plan.flip and not plan.shop then
+		if not plan.flip then
 			for _, step in craft_steps(plan) do
 				if not step.final then
 					tinsert(steps, format('Craft %d x %s first (from the mats below, not the intermediate)', step.n, step.name))
@@ -519,7 +568,8 @@ end
 function finish_plan()
 	local plan = job.plan
 	local n = job.complete_crafts or 0
-	if plan and n > 0 and not plan.flip and not plan.shop then
+	if plan and n > 0 and not plan.flip then
+		if plan.shop then job.for_craft = true end
 		for _, step in craft_steps(plan, n) do
 			tinsert(job.crafts, step)
 		end
@@ -550,7 +600,9 @@ function finish_buying()
 	end
 	print_vendor_list(job.vendor)
 	for _, step in job.crafts do
-		if step.final then
+		if step.final and job.for_craft then
+			say(format('Then craft %d x %s.', step.n, step.name))
+		elseif step.final then
 			say(format('Then craft %d x %s and sell the %d items to a vendor.', step.n, step.name, step.n * (step.yield or 1)))
 		else
 			say(format('Craft %d x %s first (used in the next step).', step.n, step.name))
