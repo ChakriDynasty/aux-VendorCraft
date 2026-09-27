@@ -3,11 +3,12 @@
 ## Notes: aux tab: scan the auction house, find crafts that sell to a vendor for profit, and buy the mats in matching amounts
 ## Version: 0.1.0
 ## Dependencies: aux-addon
-## OptionalDeps: Bagshui, ShaguTweaks, pfUI, pfQuest, pfQuest-turtle, CraftTree
+## OptionalDeps: Atlas-CFM, Bagshui, ShaguTweaks, pfUI, pfQuest, pfQuest-turtle, CraftTree
 ## SavedVariables: AuxVendorCraftDB
 
 core.lua
 octo_prices.lua
+vendor_buy.lua
 prices.lua
 recipes.lua
 book.lua

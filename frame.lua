@@ -114,6 +114,7 @@ function update_results()
 	selected_plan = selection or list and list[1]
 	results_listing:SetData(rows)
 	update_details()
+	show_craft_box()
 end
 
 function switch_view()
@@ -157,9 +158,8 @@ function update_details()
 				{value = indent .. colored_item_name(reagent.id, reagent.name) .. gray(' x' .. reagent.q)},
 				{value = tostring(reagent.need)},
 				{value = count_text(reagent.owned + (reagent.reused or 0))},
-				{value = reagent.ah_units > 0 and format('%d in %d', reagent.ah_units, getn(reagent.picks)) or gray('-')},
-				{value = reagent.ah_units > 0 and money_text(reagent.ah_cash / reagent.ah_units) or gray('-')},
-				{value = count_text(reagent.vendor)},
+				{value = reagent.ah_units > 0 and format('AH %d (%s)', reagent.ah_units, money_text(reagent.ah_cash)) or gray('-')},
+				{value = reagent.vendor > 0 and format('Vendor %d (%s)', reagent.vendor, money_text(reagent.vendor * (reagent.vendor_price or 0))) or gray('-')},
 				{value = craft_text(reagent)},
 				{value = count_text(reagent.spare, aux.color.orange)},
 				{value = count_text(alts)},
@@ -168,6 +168,36 @@ function update_details()
 		})
 	end)
 	details_listing:SetData(rows)
+	if vendor_hint then
+		vendor_hint:SetText(vendor_hint_text(plan))
+	end
+end
+
+function vendor_hint_text(plan)
+	if not plan then return '' end
+	local lines = vendor_lines(plan_vendor(plan))
+	if getn(lines) == 0 then return '' end
+	return 'Buy from a vendor: ' .. table.concat(lines, '; ')
+end
+
+function show_craft_box()
+	if not craft_box or craft_box.focused then return end
+	craft_box_updating = true
+	if selected_plan then
+		craft_box:SetText(tostring(selected_plan.crafts))
+	else
+		craft_box:SetText('')
+	end
+	craft_box_updating = false
+end
+
+function apply_craft_box()
+	if craft_box_updating or not selected_plan then return end
+	local text = craft_box:GetText() or ''
+	local n = tonumber(text)
+	if text == '' or n == 0 then n = nil end
+	set_craft_count(selected_plan.name, n)
+	show_craft_box()
 end
 
 function add_line(left, right, r, g, b)
@@ -215,8 +245,26 @@ function show_plan_tooltip(plan, owner)
 	add_line('Crafts', format('%d x %d = %d items', plan.crafts, plan.yield, plan.crafts * plan.yield))
 	add_line('Vendor pays', money_text(plan.value) .. ' each' .. (plan.verified and '' or ' *'))
 	add_line('Vendor total', money_text(plan.revenue))
-	if plan.ah_cash > 0 then add_line('Mats from auction house', money_text(plan.ah_cash)) end
-	if plan.vendor_cash > 0 then add_line('Mats from a vendor', money_text(plan.vendor_cash)) end
+	each_node(plan.reagents, function(reagent, depth)
+		local parts = {}
+		if reagent.ah_units > 0 then
+			tinsert(parts, format('AH %d (%s)', reagent.ah_units, money_text(reagent.ah_cash)))
+		end
+		if reagent.vendor > 0 then
+			tinsert(parts, format('Vendor %d (%s)', reagent.vendor, money_text(reagent.vendor * (reagent.vendor_price or 0))))
+		end
+		if getn(parts) > 0 then
+			local indent = depth > 0 and strrep('  ', depth) or ''
+			add_line(indent .. item_name(reagent.id, reagent.name), table.concat(parts, ', '))
+		end
+	end)
+	local buy_lines = vendor_lines(plan_vendor(plan))
+	for i = 1, getn(buy_lines) do
+		add_line('Buy from a vendor: ' .. buy_lines[i])
+	end
+	if plan.user_limited then
+		add_line(format('Craft count set to %d (automatic best is %d).', plan.crafts, plan.natural_crafts or plan.crafts), nil, .7, .7, .7)
+	end
 	local owned_value, spare_value = 0, 0
 	each_node(plan.reagents, function(reagent)
 		owned_value = owned_value + reagent.owned * reagent.salvage
@@ -261,7 +309,7 @@ function show_reagent_tooltip(reagent, owner)
 		add_line('Spare from another step', format('%d (bought for another line of this plan)', reagent.reused))
 	end
 	if reagent.ah_units > 0 then
-		add_line('From the auction house', format('%d in %d auctions, %s', reagent.ah_units, getn(reagent.picks), money_text(reagent.ah_cash)))
+		add_line('AH', format('%d (%s)', reagent.ah_units, money_text(reagent.ah_cash)))
 		local stacks = {}
 		for _, auction in reagent.picks do
 			local key = auction.c .. ' at ' .. money_text(auction.b / auction.c)
@@ -282,7 +330,7 @@ function show_reagent_tooltip(reagent, owner)
 		if getn(sorted) > 10 then add_line('   ...', nil, .8, .8, .8) end
 	end
 	if reagent.vendor > 0 then
-		add_line('From a vendor', format('%d at %s', reagent.vendor, money_text(reagent.vendor_price or 0)))
+		add_line('Vendor', format('%d (%s)', reagent.vendor, money_text(reagent.vendor * (reagent.vendor_price or 0))))
 	end
 	local craft = reagent.craft
 	if craft then
@@ -360,8 +408,11 @@ do
 			results_dirty = false
 			update_results()
 		end
+		-- A stale plan starts on its own. This path does not reset the item
+		-- loader's one-follow-up budget; Refresh and other user actions do.
 		if plan_stale and not busy() then
-			request_plan()
+			plan_stale = false
+			plan_requested = true
 		end
 		if GetTime() >= next_refresh then
 			next_refresh = GetTime() + .25
@@ -491,21 +542,52 @@ function aux.handle.INIT_UI()
 		selected_plan = data.plan
 		results_listing:Update()
 		update_details()
+		show_craft_box()
 	end)
 	results_listing:SetHandler('OnEnter', function(st, data, row) show_plan_tooltip(data.plan, row) end)
 	results_listing:SetHandler('OnLeave', function() GameTooltip:Hide() end)
 
-	details_listing = listing.new(details_panel)
+	local details_head = CreateFrame('Frame', nil, details_panel)
+	details_head:SetPoint('TOPLEFT', 4, -2)
+	details_head:SetPoint('TOPRIGHT', -4, -2)
+	details_head:SetHeight(24)
+
+	local details_foot = CreateFrame('Frame', nil, details_panel)
+	details_foot:SetPoint('BOTTOMLEFT', 4, 2)
+	details_foot:SetPoint('BOTTOMRIGHT', -4, 2)
+	details_foot:SetHeight(16)
+
+	local details_body = CreateFrame('Frame', nil, details_panel)
+	details_body:SetPoint('TOPLEFT', details_head, 'BOTTOMLEFT', -4, -2)
+	details_body:SetPoint('BOTTOMRIGHT', details_foot, 'TOPRIGHT', 4, 2)
+
+	craft_box = gui.editbox(details_head)
+	gui.set_size(craft_box, 52, 22)
+	craft_box:SetPoint('LEFT', 48, 0)
+	craft_box:SetAlignment('RIGHT')
+	craft_box:SetNumeric(true)
+	craft_box.enter = function() craft_box:ClearFocus() end
+	craft_box.focus_loss = function() apply_craft_box() end
+	local craft_label = gui.label(details_head, gui.font_size.small)
+	craft_label:SetPoint('RIGHT', craft_box, 'LEFT', -4, 0)
+	craft_label:SetText('Craft')
+
+	vendor_hint = gui.label(details_foot, gui.font_size.small)
+	vendor_hint:SetPoint('LEFT', 4, 0)
+	vendor_hint:SetPoint('RIGHT', -4, 0)
+	vendor_hint:SetJustifyH('LEFT')
+	vendor_hint:SetText('')
+
+	details_listing = listing.new(details_body)
 	details_listing:SetColInfo{
-		{name = 'Reagent', width = .27, align = 'LEFT'},
+		{name = 'Reagent', width = .26, align = 'LEFT'},
 		{name = 'Need', width = .06, align = 'CENTER'},
 		{name = 'Have', width = .06, align = 'CENTER'},
-		{name = 'Buy on AH', width = .12, align = 'CENTER'},
-		{name = 'Avg unit', width = .13, align = 'RIGHT'},
-		{name = 'Vendor', width = .07, align = 'CENTER'},
-		{name = 'Craft', width = .11, align = 'CENTER'},
+		{name = 'AH', width = .18, align = 'CENTER'},
+		{name = 'Vendor', width = .18, align = 'CENTER'},
+		{name = 'Craft', width = .10, align = 'CENTER'},
 		{name = 'Spare', width = .07, align = 'CENTER'},
-		{name = 'Alts', width = .11, align = 'CENTER'},
+		{name = 'Alts', width = .09, align = 'CENTER'},
 	}
 	details_listing:SetHandler('OnEnter', function(st, data, row) show_reagent_tooltip(data.reagent, row) end)
 	details_listing:SetHandler('OnLeave', function() GameTooltip:Hide() end)

@@ -13,22 +13,20 @@ PROFESSION_ALIASES = {Smelting = 'Mining'}
 NEVER_PRUNE = {Poisons = true}
 
 do
-	local crafttree_names
-	-- CraftTree's database maps product ids to recipe names. Returns the
-	-- product id and yield for a recipe name.
-	function crafttree_product(name)
-		if not _G.CraftTreeDB then return end
-		if not crafttree_names then
-			crafttree_names = {}
-			for id, list in _G.CraftTreeDB do
-				for _, recipe in list do
-					if recipe.name then
-						crafttree_names[recipe.name] = {id, recipe.yield}
-					end
+	local by_name
+	-- Product id and yield for a recipe name, from Atlas-CFM only.
+	function atlas_product(name)
+		local list = atlas_recipe_list()
+		if not list then return end
+		if not by_name then
+			by_name = {}
+			for _, recipe in list do
+				if recipe.name and not by_name[recipe.name] then
+					by_name[recipe.name] = {recipe.product, recipe.made}
 				end
 			end
 		end
-		local entry = crafttree_names[name]
+		local entry = by_name[name]
 		if entry then
 			return entry[1], entry[2]
 		end
@@ -44,7 +42,7 @@ end
 function read_recipe(index, name, color, profession)
 	local product = link_id(GetTradeSkillItemLink(index))
 		or info.item_id(name)
-		or crafttree_product(name)
+		or atlas_product(name)
 	local min_made, max_made = GetTradeSkillNumMade(index)
 	local reagents = {}
 	local complete = product and true
@@ -73,6 +71,31 @@ function read_recipe(index, name, color, profession)
 	}
 end
 
+-- Rank plus every stored recipe, so an identical profession window does not
+-- start another plan.
+function recipe_fingerprint(profession)
+	local prof = character.professions[profession]
+	local names = {}
+	for name, recipe in character.recipes do
+		if recipe.prof == profession then
+			tinsert(names, name)
+		end
+	end
+	sort(names)
+	local parts = {tostring(prof and prof.rank or 0)}
+	for i = 1, getn(names) do
+		local recipe = character.recipes[names[i]]
+		local bit = names[i] .. '=' .. (recipe.product or 0) .. 'x' .. (recipe.made or 1) .. ':' .. (recipe.color or '')
+		local reagents = recipe.reagents or EMPTY
+		for r = 1, getn(reagents) do
+			local reagent = reagents[r]
+			bit = bit .. ',' .. (reagent.id or 0) .. ':' .. (reagent.count or 1)
+		end
+		tinsert(parts, bit)
+	end
+	return table.concat(parts, '|')
+end
+
 function dump_trade_skill(expand)
 	local profession, rank, max_rank = GetTradeSkillLine()
 	if not profession or profession == 'UNKNOWN' then return end
@@ -90,6 +113,7 @@ function dump_trade_skill(expand)
 		end
 	end
 
+	local before = recipe_fingerprint(profession)
 	character.professions[profession] = {rank = rank, max = max_rank, scanned = time()}
 	for i = 1, n do
 		local name, kind = GetTradeSkillInfo(i)
@@ -102,7 +126,9 @@ function dump_trade_skill(expand)
 			end
 		end
 	end
-	plan_stale = true
+	if recipe_fingerprint(profession) ~= before then
+		plan_stale = true
+	end
 end
 
 -- Enchanting and Poisons use the Craft API, whose links are spells rather
@@ -113,11 +139,12 @@ function dump_craft()
 	if not profession then return end
 	local n = GetNumCrafts()
 	if not n or n == 0 then return end
+	local before = recipe_fingerprint(profession)
 	character.professions[profession] = {rank = rank, max = max_rank, scanned = time()}
 	for i = 1, n do
 		local name, _, kind = GetCraftInfo(i)
 		if name and kind ~= 'header' then
-			local product, yield = crafttree_product(name)
+			local product, yield = atlas_product(name)
 			product = product or info.item_id(name)
 			if product then
 				local reagents, complete = {}, true
@@ -144,7 +171,9 @@ function dump_craft()
 			end
 		end
 	end
-	plan_stale = true
+	if recipe_fingerprint(profession) ~= before then
+		plan_stale = true
+	end
 end
 
 -- Drop professions this character no longer has.

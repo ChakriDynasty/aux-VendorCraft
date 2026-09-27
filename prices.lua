@@ -59,9 +59,12 @@ end
 
 do
 	-- Items not yet in the client cache are loaded a few at a time so the
-	-- server is never flooded; plans refresh as prices arrive.
-	local queue, queued, failed = {}, {}, {}
-	local next_request, arrived, last_refresh = 0, false, 0
+	-- server is never flooded. A finished plan is refreshed at most once
+	-- after this queue has gone idle. Later cache fills do not start another
+	-- plan unless a price that was missing has actually arrived. Nothing here
+	-- marks the plan stale while a plan is running.
+	local queue, queued, failed, pending, missing_price = {}, {}, {}, {}, {}
+	local next_request, arrived, missing_arrived, followup_done = 0, false, false, false
 
 	function queue_item_load(id)
 		if queued[id] or failed[id] then return end
@@ -73,24 +76,67 @@ do
 		return getn(queue)
 	end
 
+	-- vendor_sell queued a load and no source had a price yet.
+	function note_uncached(id)
+		missing_price[id] = true
+	end
+
+	-- The next user-requested plan may be followed by one cache refresh.
+	function allow_price_followup()
+		followup_done = false
+	end
+
+	local function loads_idle()
+		if getn(queue) > 0 then return false end
+		for _ in pending do
+			return false
+		end
+		return true
+	end
+
+	local function note_loaded(id, success)
+		if id and not success then
+			failed[id] = true
+		end
+		if id then
+			pending[id] = nil
+		end
+		if id and success and missing_price[id] and _G.C_Item and _G.C_Item.IsItemDataCachedByID(id) then
+			local price = _G.C_Item.GetItemSellPriceByID(id)
+			if price ~= nil then
+				missing_price[id] = nil
+				missing_arrived = true
+			end
+		end
+		arrived = true
+	end
+
 	function aux.handle.LOAD()
 		if not classic_api() then return end
 		aux.event_listener('ITEM_DATA_LOAD_RESULT', function()
-			if arg1 and not arg2 then failed[arg1] = true end
-			arrived = true
+			note_loaded(arg1, arg2)
 		end)
+		-- This event does not report failure; a missing arg2 must not blacklist the item.
 		aux.event_listener('GET_ITEM_INFO_RECEIVED', function()
-			arrived = true
+			note_loaded(arg1, true)
 		end)
 	end
 
 	on_tick(function()
 		if getn(queue) > 0 and GetTime() >= next_request then
 			next_request = GetTime() + .05
-			_G.C_Item.RequestLoadItemDataByID(tremove(queue, 1))
+			local id = tremove(queue, 1)
+			pending[id] = true
+			_G.C_Item.RequestLoadItemDataByID(id)
 		end
-		if arrived and (getn(queue) == 0 or GetTime() - last_refresh > 20) then
-			arrived, last_refresh = false, GetTime()
+		-- Leave arrivals pending while a plan is running, while another plan
+		-- is about to start, or while loads are still in flight.
+		if busy() or plan_requested or not loads_idle() then return end
+		if not arrived and not missing_arrived then return end
+		local fresh = missing_arrived
+		arrived, missing_arrived = false, false
+		if fresh or not followup_done then
+			followup_done = true
 			plan_stale = true
 		end
 	end)
@@ -101,6 +147,7 @@ end
 -- aux) or /vcraft price, rather than a static table. Third return names the
 -- source.
 function vendor_sell(id)
+	local waiting
 	if classic_api() then
 		if _G.C_Item.IsItemDataCachedByID(id) then
 			local price = _G.C_Item.GetItemSellPriceByID(id)
@@ -109,6 +156,7 @@ function vendor_sell(id)
 			end
 		else
 			queue_item_load(id)
+			waiting = true
 		end
 	end
 	local learned = info.merchant_info(id)
@@ -134,6 +182,9 @@ function vendor_sell(id)
 	if pf then
 		return pf, false, 'pfUI vanilla table'
 	end
+	if waiting then
+		note_uncached(id)
+	end
 end
 
 -- An NPC with stock 0 in pfQuest's item table sells the item without limit.
@@ -149,10 +200,15 @@ function sold_by_vendor(id)
 end
 
 -- Unit price when the item can be bought from a vendor without a stock limit, else nil.
+-- A zero or missing price is not a vendor.
 function vendor_buy(id)
 	local _, learned, limited = info.merchant_info(id)
-	if learned and not limited then
+	if learned and not limited and learned > 0 then
 		return learned, true
+	end
+	local scraped = VENDOR_BUY[id]
+	if scraped and scraped > 0 then
+		return scraped, false
 	end
 	if sold_by_vendor(id) then
 		local _, pf = pf_prices(id)
@@ -242,9 +298,23 @@ function read_inbox()
 			seen[id] = (seen[id] or 0) + (count or 1)
 		end
 	end
+	local changed
+	for id, n in seen do
+		if character.mail.seen[id] ~= n then changed = true end
+	end
+	for id in character.mail.seen do
+		if seen[id] == nil then changed = true end
+	end
+	for _ in character.mail.bought do
+		changed = true
+		break
+	end
 	character.mail.seen = seen
 	character.mail.bought = {}
-	plan_stale = true
+	-- An unchanged inbox must not start another plan.
+	if changed then
+		plan_stale = true
+	end
 end
 
 do

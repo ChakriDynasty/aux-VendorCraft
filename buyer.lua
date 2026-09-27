@@ -66,6 +66,7 @@ function request_buy(plans)
 		print_vendor_list(vendor)
 		return
 	end
+	print_vendor_list(vendor)
 	if GetMoney() - settings.gold_reserve < ah_cash then
 		say(format('Not enough gold: the mats cost %s and you keep %s in reserve.', money_text(ah_cash), money_text(settings.gold_reserve)))
 		return

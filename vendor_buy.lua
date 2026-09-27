@@ -1,0 +1,76 @@
+module 'aux.tabs.vendorcraft'
+
+-- NPC buy prices in copper per item, from OctoWoW vendors with no stock limit.
+-- A missing key or a price of 0 is not a vendor, so it never forces a vendor buy.
+-- Limited-stock vendors are omitted, so their price cannot block an auction buy.
+VENDOR_BUY = {
+	[159] = 25, -- Refreshing Spring Water
+	[1179] = 125, -- Ice Cold Milk
+	[2320] = 10, -- Coarse Thread
+	[2321] = 100, -- Fine Thread
+	[2324] = 25, -- Bleach
+	[2325] = 1000, -- Black Dye
+	[2577] = 300, -- Blue Linen Shirt
+	[2596] = 120, -- Skin of Dwarven Stout
+	[2604] = 50, -- Red Dye
+	[2605] = 100, -- Green Dye
+	[2665] = 20, -- Stormwind Seasoning Herbs
+	[2678] = 10, -- Mild Spices
+	[2692] = 40, -- Hot Spices
+	[2880] = 100, -- Weak Flux
+	[2894] = 50, -- Rhapsody Malt
+	[2901] = 81, -- Mining Pick
+	[2928] = 20, -- Dust of Decay
+	[2930] = 50, -- Essence of Pain
+	[2931] = 100, -- Maiden's Anguish
+	[3371] = 20, -- Empty Vial
+	[3372] = 200, -- Leaded Vial
+	[3466] = 2000, -- Strong Flux
+	[3713] = 160, -- Soothing Spices
+	[3857] = 500, -- Coal
+	[4289] = 50, -- Salt
+	[4291] = 500, -- Silken Thread
+	[4340] = 350, -- Gray Dye
+	[4341] = 500, -- Yellow Dye
+	[4342] = 2500, -- Purple Dye
+	[4399] = 200, -- Wooden Stock
+	[4400] = 2000, -- Heavy Stock
+	[4536] = 25, -- Shiny Red Apple
+	[4595] = 300, -- Junglevine Wine
+	[5173] = 100, -- Deathweed
+	[6183] = 10, -- Unlit Poor Torch
+	[6217] = 124, -- Copper Rod
+	[6260] = 50, -- Blue Dye
+	[6261] = 1000, -- Orange Dye
+	[6308] = 40, -- Raw Bristle Whisker Catfish
+	[6530] = 100, -- Nightcrawlers
+	[7005] = 82, -- Skinning Knife
+	[7011] = 85, -- Rugged String
+	[8343] = 2000, -- Heavy Silken Thread
+	[8923] = 200, -- Essence of Agony
+	[8924] = 100, -- Dust of Deterioration
+	[8925] = 2500, -- Crystal Vial
+	[10290] = 2500, -- Pink Dye
+	[10647] = 2000, -- Engineer's Ink
+	[10648] = 500, -- Blank Parchment
+	[12662] = 2400, -- Demonic Rune
+	[14341] = 5000, -- Rune Thread
+	[16206] = 1500000, -- Arcanite Rod
+	[17028] = 700, -- Holy Candle
+	[17034] = 200, -- Maple Seed
+	[17035] = 400, -- Stranglethorn Seed
+	[17194] = 10, -- Holiday Spices
+	[17196] = 50, -- Holiday Spirits
+	[17202] = 100, -- Snowball
+	[18256] = 30000, -- Imbued Vial
+	[18288] = 1000, -- Molasses Firewater
+	[18567] = 150000, -- Elemental Flux
+	[42005] = 12, -- Remedy Herbs
+	[42006] = 85, -- Springy Rope
+	[50231] = 100, -- Sturdy Rope
+	[55155] = 200, -- Jewelers Kit
+	[55245] = 100, -- Polishing Oil
+	[55246] = 500, -- Shimmering Oil
+	[55247] = 2500, -- Gemstone Oil
+	[61173] = 700, -- Premium Chocolate
+}

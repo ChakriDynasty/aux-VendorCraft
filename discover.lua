@@ -2,11 +2,132 @@ module 'aux.tabs.vendorcraft'
 
 local aux = require 'aux'
 
--- Recipes this character does not know, from CraftTree's database (AtlasLoot
--- data): each is scored on its own against the auction house alone.
+-- Recipes this character does not know, from Atlas-CFM. Each is scored on
+-- its own against the auction house alone. CraftTree is not a recipe source.
 
 function craft_database_loaded()
-	return _G.CraftTreeDB ~= nil
+	return atlas_available()
+end
+
+-- Atlas-CFM (the Turtle WoW loot database) keeps the current reagent lists.
+function atlas_available()
+	local cfm = _G.AtlasCFM
+	return cfm and cfm.SpellDB and cfm.SpellDB.craftspells and true
+end
+
+-- Longer prefixes first, so "Dragonscale" is not read as plain leatherworking.
+PROFESSION_PREFIXES = {
+	{'Dragonscale', 'Dragonscale Leatherworking'},
+	{'Elemental', 'Elemental Leatherworking'},
+	{'Tribal', 'Tribal Leatherworking'},
+	{'Leather', 'Leatherworking'},
+	{'Armorsmith', 'Blacksmithing: Armorsmith'},
+	{'Weaponsmith', 'Blacksmithing: Weaponsmith'},
+	{'Axesmith', 'Blacksmithing: Master Axesmith'},
+	{'Hammersmith', 'Blacksmithing: Master Hammersmith'},
+	{'Swordsmith', 'Blacksmithing: Master Swordsmith'},
+	{'Smithing', 'Blacksmithing'},
+	{'Goblin', 'Goblin Engineering'},
+	{'Gnomish', 'Gnomish Engineering'},
+	{'Engineering', 'Engineering'},
+	{'Goldsmith', 'Jewelcrafting: Goldsmithing'},
+	{'Gemology', 'Jewelcrafting: Gemology'},
+	{'Jewelcrafting', 'Jewelcrafting'},
+	{'FirstAid', 'First Aid'},
+	{'Smelting', 'Smelting'},
+	{'Mining', 'Mining'},
+	{'Tailoring', 'Tailoring'},
+	{'Alchemy', 'Alchemy'},
+	{'Enchanting', 'Enchanting'},
+	{'Cooking', 'Cooking'},
+	{'Survival', 'Survival'},
+	{'Poison', 'Poisons'},
+}
+
+function profession_of(table_key)
+	for _, row in PROFESSION_PREFIXES do
+		if strfind(table_key, '^' .. row[1]) then return row[2] end
+	end
+end
+
+function turtle_row(row)
+	if not row.servers then return end
+	for _, server in row.servers do
+		if server and strfind(server, 'Turtle') then return true end
+	end
+end
+
+-- spell id -> {prof, skill, yield} from Atlas-CFM's crafting lists.
+function atlas_spell_info()
+	local info, data = {}, _G.AtlasCFMLoot_Data or EMPTY
+	local function add(row, prof, override)
+		if not row.id or not prof then return end
+		if info[row.id] and not override then return end
+		local skill = row.skill
+		if type(skill) == 'table' then skill = skill[1] end
+		info[row.id] = {prof = prof, skill = skill, yield = row.quantity or (info[row.id] and info[row.id].yield) or 1}
+	end
+	for key, rows in data do
+		local prof = profession_of(key)
+		if prof and type(rows) == 'table' then
+			for _, row in rows do
+				if type(row) == 'table' and row.id and not turtle_row(row) then
+					add(row, prof)
+				end
+			end
+		end
+	end
+	for key, rows in data do
+		local prof = profession_of(key)
+		if prof and type(rows) == 'table' then
+			for _, row in rows do
+				if type(row) == 'table' and row.id and turtle_row(row) then
+					add(row, prof, true)
+				end
+			end
+		end
+	end
+	return info
+end
+
+-- The whole database, keyed like unknown_recipes. Nil when Atlas-CFM is absent.
+function atlas_recipe_list()
+	if atlas_recipes then return atlas_recipes end
+	if not atlas_available() then return end
+	local info = atlas_spell_info()
+	local recipes = {}
+	for spell, data in _G.AtlasCFM.SpellDB.craftspells do
+		-- Turtle corrections override the vanilla reagent list.
+		local raw = data.reagents_TURTLE1 or data.reagents_TURTLE or data.reagents
+		if data.item and raw and getn(raw) > 0 then
+			local about = info[spell] or EMPTY
+			local name = data.name
+			if type(name) ~= 'string' or name == '' then
+				name = item_name(data.item)
+			end
+			if name and not strfind(name, '^Enchant ') then
+				local reagents = {}
+				for _, pair in raw do
+					if pair[1] then
+						tinsert(reagents, {id = pair[1], count = pair[2] or 1})
+					end
+				end
+				if getn(reagents) > 0 then
+					recipes[name .. '#' .. spell] = {
+						name = name,
+						product = data.item,
+						made = max(1, about.yield or 1),
+						reagents = reagents,
+						prof = about.prof,
+						skill = about.skill,
+						cooldown = has_cooldown(name) or nil,
+					}
+				end
+			end
+		end
+	end
+	atlas_recipes = recipes
+	return recipes
 end
 
 -- Product id -> name of another character (on any realm) whose recipes
@@ -27,42 +148,17 @@ function alt_crafters()
 end
 
 function unknown_recipes()
-	local database = _G.CraftTreeDB
-	if not database then return end
-	local sources = _G.CraftTreeSources or EMPTY
+	local atlas = atlas_recipe_list()
+	if not atlas then return end
 	local known_products, known_names = {}, {}
 	for name, recipe in character.recipes do
 		known_names[name] = true
-		if recipe.product then
-			known_products[recipe.product] = true
-		end
+		if recipe.product then known_products[recipe.product] = true end
 	end
 	local recipes = {}
-	for product, variants in database do
-		if not known_products[product] then
-			local source = sources[product]
-			local _, _, skill = strfind(source and source.skill or '', '(%d+)')
-			skill = tonumber(skill)
-			for _, variant in variants do
-				-- CraftTree also lists enchants under their spell id; those make
-				-- no item a vendor could buy.
-				local enchant = variant.name and strfind(variant.name, '^Enchant ')
-				if variant.name and not enchant and not known_names[variant.name] and variant.reagents and getn(variant.reagents) > 0 then
-					local reagents = {}
-					for _, pair in variant.reagents do
-						tinsert(reagents, {id = pair[1], count = pair[2] or 1})
-					end
-					recipes[variant.name .. '#' .. (variant.spell or product)] = {
-						name = variant.name,
-						product = product,
-						made = max(1, variant.yield or 1),
-						reagents = reagents,
-						prof = source and source.profession,
-						skill = skill,
-						cooldown = has_cooldown(variant.name) or nil,
-					}
-				end
-			end
+	for key, recipe in atlas do
+		if not known_products[recipe.product] and not known_names[recipe.name] then
+			recipes[key] = recipe
 		end
 	end
 	return recipes

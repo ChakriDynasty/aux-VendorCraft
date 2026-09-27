@@ -514,8 +514,103 @@ function plan_everything()
 	}
 end
 
+-- Session-only caps, recipe name -> crafts. Not saved.
+craft_limits = {}
+
+function uncommit(plan, sup)
+	each_node(plan.reagents, function(entry)
+		for _, auction in entry.picks do
+			auction.taken = nil
+		end
+		if entry.owned > 0 then
+			sup.owned[entry.id] = (sup.owned[entry.id] or 0) + entry.owned
+		end
+	end)
+	sup.budget = (sup.budget or 0) + plan.cash
+	sup.craft_cache, sup.cheap = {}, {}
+end
+
+-- Recompute one recipe at `limit` (nil = automatic best). `committed` is true
+-- for plans whose mats were reserved by plan_all.
+function retarget(plan, sup, limit, committed)
+	local natural = plan.natural_crafts or plan.crafts
+	if committed then uncommit(plan, sup) end
+	local again = eval_recipe(plan.name, plan.recipe, sup, limit)
+	if not again then
+		if committed then commit(plan, sup) end
+		return plan
+	end
+	again.discovered = plan.discovered
+	again.alt = plan.alt
+	if limit then
+		again.natural_crafts = natural
+		again.user_limited = true
+		again.unlimited = false
+	else
+		again.natural_crafts = again.crafts
+	end
+	if committed then commit(again, sup) end
+	return again
+end
+
+function stamp_and_limit(plans, sup, committed)
+	if not plans then return end
+	for i = 1, getn(plans) do
+		plans[i].natural_crafts = plans[i].crafts
+	end
+	if not sup then return end
+	for i = 1, getn(plans) do
+		local plan = plans[i]
+		local n = craft_limits[plan.name]
+		local natural = plan.natural_crafts or plan.crafts
+		if n and n >= 1 and n < natural then
+			plans[i] = retarget(plan, sup, n, committed)
+		end
+	end
+end
+
+-- Cap one recipe at n crafts, or clear the cap when n is nil, 0, or at least
+-- the automatic best. Never plans more than that best.
+function set_craft_count(name, n)
+	local list = current_results()
+	local sup = current_supply()
+	if not list or not sup then return end
+	local plan, index
+	for i = 1, getn(list) do
+		if list[i].name == name then
+			plan, index = list[i], i
+		end
+	end
+	if not plan then return end
+	local natural = plan.natural_crafts or plan.crafts
+	if type(n) == 'string' then n = tonumber(n) end
+	if n then n = floor(n) end
+	if n and n > natural then n = natural end
+	local clearing = not n or n < 1 or n >= natural
+	if clearing then
+		craft_limits[name] = nil
+		if not plan.user_limited then return plan end
+		n = nil
+	else
+		craft_limits[name] = n
+		if plan.user_limited and plan.crafts == n then return plan end
+	end
+	local updated = retarget(plan, sup, n, view ~= 'other')
+	list[index] = updated
+	if selected_plan and selected_plan.name == name then
+		selected_plan = updated
+	end
+	if last_run then
+		summarize(last_run)
+		if not busy() then set_status(1, view_summary()) end
+	end
+	results_dirty = true
+	return updated
+end
+
 function request_plan()
 	plan_requested = true
+	allow_price_followup()
 end
 
 function busy()
@@ -536,7 +631,7 @@ function summarize(run)
 	end
 	unpriced_other = run.other_unpriced or 0
 	if not run.other then
-		summary_other = 'Enable the CraftTree addon for the recipe database'
+		summary_other = 'Enable Atlas-CFM (or CraftTree) for the recipe database'
 	elseif unpriced_other > 0 then
 		summary_other = format('%d profitable, %d unpriced', getn(run.other), unpriced_other)
 	elseif getn(run.other) > 0 then
@@ -566,6 +661,8 @@ on_tick(function()
 		say('Planning failed: ' .. tostring(run))
 	elseif coroutine.status(plan_co) == 'dead' then
 		plan_co = nil
+		stamp_and_limit(run.plans, run.sup, true)
+		stamp_and_limit(run.other, run.other_sup, false)
 		results, last_skipped, last_supply = run.plans, run.skipped, run.sup
 		other_results, other_supply = run.other, run.other_sup
 		last_run = run
