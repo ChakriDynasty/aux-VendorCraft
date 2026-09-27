@@ -424,7 +424,6 @@ function refresh_controls()
 	local can_buy = view == 'mine' and not scanning and not buying
 	if can_buy and selected_plan then buy_button:Enable() else buy_button:Disable() end
 	if can_buy and results and getn(results) > 0 then buy_all_button:Enable() else buy_all_button:Disable() end
-	if craft_box then craft_box:Enable() end
 	local line1, line2 = scan_summary()
 	scan_label:SetText(line1 .. '\n' .. gray(line2))
 end

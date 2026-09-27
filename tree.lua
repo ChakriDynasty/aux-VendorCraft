@@ -8,20 +8,36 @@ local aux = require 'aux'
 
 MAX_DEPTH = 3
 
+-- Leather upgrades (4 Light -> Medium, 5 Medium -> Heavy, ...) turn one
+-- Heavy Leather into dozens of Light Leather. Treat the leather you need
+-- as a base mat; do not craft it from a lower grade.
+LEATHER_GRADES = {
+	[2934] = true, -- Ruined Leather Scraps
+	[2318] = true, -- Light Leather
+	[2319] = true, -- Medium Leather
+	[4234] = true, -- Heavy Leather
+	[4304] = true, -- Thick Leather
+	[8170] = true, -- Rugged Leather
+}
+
+function is_leather_grade(id)
+	return id and LEATHER_GRADES[id]
+end
+
 -- Item id -> {name, recipe, known} for every recipe that can make it.
--- Known recipes win over database ones; cooldown recipes are never used as
--- a step in a tree.
+-- Known recipes win over database ones; cooldown recipes and leather-grade
+-- upgrades are never used as a step in a tree.
 function build_makers(allow_database)
 	local makers = {}
 	if allow_database then
 		for _, recipe in unknown_recipes() or EMPTY do
-			if recipe.product and not recipe_on_cooldown(recipe.name, recipe) and not makers[recipe.product] then
+			if recipe.product and not is_leather_grade(recipe.product) and not recipe_on_cooldown(recipe.name, recipe) and not makers[recipe.product] then
 				makers[recipe.product] = {name = recipe.name, recipe = recipe, known = false}
 			end
 		end
 	end
 	for name, recipe in character.recipes do
-		if recipe.product and not recipe_on_cooldown(name, recipe) then
+		if recipe.product and not is_leather_grade(recipe.product) and not recipe_on_cooldown(name, recipe) then
 			makers[recipe.product] = {name = name, recipe = recipe, known = true}
 		end
 	end
