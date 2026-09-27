@@ -18,6 +18,42 @@ StaticPopupDialogs.AUX_VENDORCRAFT_BUY = {
 	showAlert = 1,
 }
 
+StaticPopupDialogs.AUX_VENDORCRAFT_SHOP_BUY = {
+	text = '%s',
+	button1 = 'Buy',
+	button2 = 'Cancel',
+	hasEditBox = 1,
+	OnShow = function()
+		local box = _G[this:GetName() .. 'EditBox']
+		shop_popup_filling = true
+		if box then
+			box:SetNumeric(true)
+			box:SetText(tostring(shop_qty()))
+			box:SetFocus()
+			box:HighlightText()
+		end
+		shop_popup_filling = nil
+	end,
+	OnAccept = function()
+		shop_accept_popup()
+	end,
+	OnCancel = function()
+		pending_plans = nil
+		buy_prompt = nil
+	end,
+	EditBoxOnEnterPressed = function()
+		shop_accept_popup()
+		this:GetParent():Hide()
+	end,
+	EditBoxOnTextChanged = function()
+		if shop_popup_filling then return end
+		shop_refresh_popup_qty()
+	end,
+	timeout = 0,
+	hideOnEscape = 1,
+	showAlert = 1,
+}
+
 StaticPopupDialogs.AUX_VENDORCRAFT_OWNED = {
 	text = '%s',
 	button1 = 'Use my mats',
@@ -275,12 +311,7 @@ function show_buy_confirm(plans)
 	end
 	local text
 	if shop_only then
-		local vendor_total, mat_all = 0, 0
-		for _, plan in plans do
-			vendor_total = vendor_total + (plan.revenue or 0)
-			mat_all = mat_all + (plan.all_cost or plan.cash or 0)
-		end
-		text = format('Buy %d auctions of %d items for %s?\nVendor pays %s for the finished items.\nMats if you buy all: %s.\nSpread vs vendor: %s.', auctions, item_count, money_text(ah_cash), money_text(vendor_total), money_text(mat_all), money_text(profit))
+		text = shop_confirm_text(plans)
 	else
 		text = format('Buy %d auctions of %d items for %s?\nExpected profit: %s\nMats are bought one complete craft at a time.', auctions, item_count, money_text(ah_cash), money_text(profit))
 	end
@@ -302,7 +333,65 @@ function show_buy_confirm(plans)
 		text = text .. '\n\nYou also need from a vendor:\n' .. table.concat(lines, '\n')
 	end
 	pending_plans = plans
-	StaticPopup_Show('AUX_VENDORCRAFT_BUY', text)
+	if shop_only then
+		StaticPopup_Show('AUX_VENDORCRAFT_SHOP_BUY', text)
+	else
+		StaticPopup_Show('AUX_VENDORCRAFT_BUY', text)
+	end
+end
+
+function shop_confirm_text(plans)
+	local vendor_total, mat_all, missing = 0, 0, 0
+	local qty = 1
+	for _, plan in plans do
+		vendor_total = vendor_total + (plan.revenue or 0)
+		mat_all = mat_all + (plan.all_cost or plan.cash or 0)
+		missing = missing + (plan.cash or 0)
+		qty = plan.shop_qty or qty
+	end
+	return format('Craft quantity is the box below.\n\n%d to craft.\nMissing mats %s. All mats %s.\nVendor pays %s for the finished items.\nSpread vs vendor: %s.', qty, money_text(missing), money_text(mat_all), money_text(vendor_total), money_text(plans[1] and plans[1].profit or 0))
+end
+
+function shop_popup_frame()
+	for i = 1, 4 do
+		local frame = _G['StaticPopup' .. i]
+		if frame and frame:IsShown() and frame.which == 'AUX_VENDORCRAFT_SHOP_BUY' then
+			return frame, _G['StaticPopup' .. i .. 'EditBox'], _G['StaticPopup' .. i .. 'Text']
+		end
+	end
+end
+
+function shop_accept_popup()
+	local plan = pending_plans and pending_plans[1]
+	if plan and plan.shop then
+		local _, box = shop_popup_frame()
+		local qty = box and tonumber(box:GetText()) or plan.shop_qty or 1
+		if not qty or qty < 1 then qty = 1 end
+		qty = floor(qty)
+		if shop_qty_box then shop_qty_box:SetText(tostring(qty)) end
+		if qty ~= plan.shop_qty then
+			shop_market_cache = build_supply(EMPTY, true, true)
+			plan = build_shop_plan(plan.shop_target, qty, plan.shop_extra, plan.shop_ignore)
+			shop_market_cache = nil
+			pending_plans = {plan}
+		end
+	end
+	start_buying()
+end
+
+function shop_refresh_popup_qty()
+	local plan = pending_plans and pending_plans[1]
+	local frame, box, label = shop_popup_frame()
+	if not plan or not plan.shop or not frame or not box then return end
+	local qty = tonumber(box:GetText())
+	if not qty or qty < 1 or qty == plan.shop_qty then return end
+	qty = floor(qty)
+	shop_market_cache = build_supply(EMPTY, true, true)
+	local again = build_shop_plan(plan.shop_target, qty, plan.shop_extra, plan.shop_ignore)
+	shop_market_cache = nil
+	pending_plans = {again}
+	if shop_qty_box then shop_qty_box:SetText(tostring(qty)) end
+	if label then label:SetText(shop_confirm_text({again})) end
 end
 
 function vendor_lines(vendor)

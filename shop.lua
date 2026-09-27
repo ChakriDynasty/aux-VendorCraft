@@ -449,6 +449,8 @@ function build_shop_plan(target, qty, extra, ignore_owned)
 		shop = true,
 		shop_target = target,
 		shop_qty = qty,
+		shop_extra = extra,
+		shop_ignore = ignore_owned and true or false,
 		recipe = recipe,
 		reagents = entries,
 		steps = EMPTY,

@@ -26,18 +26,32 @@ end
 
 function wrap_tooltip(name, fetch)
 	local orig = GameTooltip[name]
-	if not orig then return end
-	GameTooltip[name] = function(self, a, b)
+	if not orig or orig.vendorcraft then return end
+	local function hooked(self, a, b)
+		remember_tip(fetch(a, b))
 		orig(self, a, b)
-		local link, quantity = fetch(a, b)
-		add_vendor_line(self, link, quantity)
+		remember_tip(fetch(a, b))
+	end
+	hooked.vendorcraft = true
+	GameTooltip[name] = hooked
+end
+
+function tip_item()
+	local lib = _G.pfUI and _G.pfUI.api and _G.pfUI.api.libtooltip
+	if lib and lib.itemLink then
+		return lib.itemLink, lib.itemCount
+	end
+	return vendor_tip_link, vendor_tip_count
+end
+
+function remember_tip(link, quantity)
+	if link then
+		vendor_tip_link = link
+		vendor_tip_count = quantity
 	end
 end
 
-function aux.handle.LOAD2()
-	if vendor_tooltip_hooked then return end
-	vendor_tooltip_hooked = true
-
+function apply_vendor_hooks()
 	wrap_tooltip('SetHyperlink', function(itemstring)
 		return itemstring, 1
 	end)
@@ -95,13 +109,38 @@ function aux.handle.LOAD2()
 		return id and ('item:' .. id) or nil, quantity
 	end)
 
-	local orig_ref = _G.SetItemRef
-	_G.SetItemRef = function(link, text, button)
-		orig_ref(link, text, button)
-		if link and not IsShiftKeyDown() and not IsControlKeyDown() then
-			add_vendor_line(ItemRefTooltip, link, 1)
+	if not _G.SetItemRef.vendorcraft then
+		local orig_ref = _G.SetItemRef
+		local function hooked(link, text, button)
+			orig_ref(link, text, button)
+			if link and not IsShiftKeyDown() and not IsControlKeyDown() then
+				add_vendor_line(ItemRefTooltip, link, 1)
+			end
 		end
+		hooked.vendorcraft = true
+		_G.SetItemRef = hooked
 	end
+end
+
+function aux.handle.LOAD2()
+	if vendor_tooltip_hooked then return end
+	vendor_tooltip_hooked = true
+	apply_vendor_hooks()
+
+	local watcher = CreateFrame('Frame')
+	watcher:SetScript('OnUpdate', function()
+		apply_vendor_hooks()
+		if GameTooltip:IsVisible() then
+			local link, count = tip_item()
+			if link and link ~= vendor_tip_shown then
+				vendor_tip_shown = link
+				add_vendor_line(GameTooltip, link, count)
+			end
+		else
+			vendor_tip_shown = nil
+			vendor_tip_link = nil
+		end
+	end)
 end
 
 function info_item_id(name)
