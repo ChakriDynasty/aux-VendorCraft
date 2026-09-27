@@ -61,8 +61,7 @@ do
 	-- Items not yet in the client cache are loaded a few at a time so the
 	-- server is never flooded. A finished plan is refreshed at most once
 	-- after this queue has gone idle. Later cache fills do not start another
-	-- plan unless a price that was missing has actually arrived. Nothing here
-	-- marks the plan stale while a plan is running.
+	-- plan. Nothing here marks the plan stale while a plan is running.
 	local queue, queued, failed, pending, missing_price = {}, {}, {}, {}, {}
 	local next_request, arrived, missing_arrived, followup_done = 0, false, false, false
 
@@ -133,10 +132,13 @@ do
 		-- is about to start, or while loads are still in flight.
 		if busy() or plan_requested or not loads_idle() then return end
 		if not arrived and not missing_arrived then return end
-		local fresh = missing_arrived
 		arrived, missing_arrived = false, false
-		if fresh or not followup_done then
+		-- One automatic replan after the cache goes idle. Each plan queues
+		-- more items, so treating every newly arrived price as a reason to
+		-- start again loops forever over the recipe list.
+		if not followup_done then
 			followup_done = true
+			if reset_atlas_cache then reset_atlas_cache() end
 			plan_stale = true
 		end
 	end)

@@ -3,7 +3,7 @@ module 'aux.tabs.vendorcraft'
 local aux = require 'aux'
 local money = require 'aux.util.money'
 
-M.VERSION = '0.1.0'
+M.VERSION = '0.2.0'
 
 DEFAULTS = {
 	min_profit = 500,

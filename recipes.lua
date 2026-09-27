@@ -13,13 +13,13 @@ PROFESSION_ALIASES = {Smelting = 'Mining'}
 NEVER_PRUNE = {Poisons = true}
 
 do
-	local by_name
+	local by_name, source
 	-- Product id and yield for a recipe name, from Atlas-CFM only.
 	function atlas_product(name)
 		local list = atlas_recipe_list()
 		if not list then return end
-		if not by_name then
-			by_name = {}
+		if source ~= list then
+			source, by_name = list, {}
 			for _, recipe in list do
 				if recipe.name and not by_name[recipe.name] then
 					by_name[recipe.name] = {recipe.product, recipe.made}
@@ -121,8 +121,14 @@ function dump_trade_skill(expand)
 			-- Recipes are merged, never removed here: a filtered or collapsed
 			-- list only hides recipes, it does not unlearn them.
 			local recipe = read_recipe(i, name, kind, profession)
-			if recipe then
-				character.recipes[name] = recipe
+			-- The list can shift mid-read; keep the row only when it is
+			-- still this recipe, and never replace a complete one with a
+			-- half-read one (that flips the fingerprint every tick).
+			if recipe and GetTradeSkillInfo(i) == name then
+				local old = character.recipes[name]
+				if not old or recipe.complete or not old.complete then
+					character.recipes[name] = recipe
+				end
 			end
 		end
 	end
@@ -158,15 +164,18 @@ function dump_craft()
 					tinsert(reagents, {id = id, count = count or 1, name = reagent_name})
 				end
 				if getn(reagents) > 0 then
-					character.recipes[name] = {
-						prof = profession,
-						product = product,
-						made = max(1, yield or 1),
-						reagents = reagents,
-						complete = complete or nil,
-						color = kind,
-						cooldown = has_cooldown(name) or nil,
-					}
+					local old = character.recipes[name]
+					if not old or complete or not old.complete then
+						character.recipes[name] = {
+							prof = profession,
+							product = product,
+							made = max(1, yield or 1),
+							reagents = reagents,
+							complete = complete or nil,
+							color = kind,
+							cooldown = has_cooldown(name) or nil,
+						}
+					end
 				end
 			end
 		end

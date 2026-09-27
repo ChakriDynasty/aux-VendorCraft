@@ -185,8 +185,12 @@ function show_craft_box()
 	craft_box_updating = true
 	if selected_plan then
 		craft_box:SetText(tostring(selected_plan.crafts))
+		if craft_max_label then
+			craft_max_label:SetText('/ ' .. (selected_plan.natural_crafts or selected_plan.crafts))
+		end
 	else
 		craft_box:SetText('')
+		if craft_max_label then craft_max_label:SetText('') end
 	end
 	craft_box_updating = false
 end
@@ -208,6 +212,34 @@ function add_line(left, right, r, g, b)
 	end
 end
 
+function add_ah_scan_lines(id)
+	load_book()
+	local list = book_listing(id)
+	local meta = book_meta or EMPTY
+	if not meta.scanned then
+		add_line('AH last scan', 'no scan yet')
+		return
+	end
+	if getn(list) == 0 then
+		add_line('AH last scan (' .. format_age(meta.scanned) .. ')', 'none listed')
+		return
+	end
+	local units, levels, seen = 0, {}, {}
+	for i = 1, getn(list) do
+		units = units + list[i].c
+		local unit = list[i].b / list[i].c
+		local key = tostring(floor(unit + .5))
+		if not seen[key] then
+			seen[key] = true
+			tinsert(levels, unit)
+		end
+	end
+	add_line('AH last scan (' .. format_age(meta.scanned) .. ')', format('%s each, %d listed', money_text(levels[1]), units))
+	for i = 2, min(getn(levels), 5) do
+		add_line('   also', money_text(levels[i]) .. ' each', .8, .8, .8)
+	end
+end
+
 function item_tooltip(id, fallback, owner)
 	GameTooltip:SetOwner(owner, 'ANCHOR_RIGHT')
 	if info.item(id) and GetItemInfo('item:' .. id) then
@@ -216,6 +248,7 @@ function item_tooltip(id, fallback, owner)
 		GameTooltip:AddLine(item_name(id, fallback), 1, 1, 1)
 	end
 	GameTooltip:AddLine(' ')
+	add_ah_scan_lines(id)
 end
 
 function show_plan_tooltip(plan, owner)
@@ -571,6 +604,9 @@ function aux.handle.INIT_UI()
 	local craft_label = gui.label(details_head, gui.font_size.small)
 	craft_label:SetPoint('RIGHT', craft_box, 'LEFT', -4, 0)
 	craft_label:SetText('Craft')
+	craft_max_label = gui.label(details_head, gui.font_size.small)
+	craft_max_label:SetPoint('LEFT', craft_box, 'RIGHT', 4, 0)
+	craft_max_label:SetText('')
 
 	vendor_hint = gui.label(details_foot, gui.font_size.small)
 	vendor_hint:SetPoint('LEFT', 4, 0)
@@ -608,6 +644,7 @@ function aux.handle.INIT_UI()
 		gui.set_size(btn, 95, 24)
 		btn:SetText('Buy selected')
 		btn:SetScript('OnClick', function()
+			apply_craft_box()
 			if selected_plan then request_buy({selected_plan}) end
 		end)
 		buy_button = btn

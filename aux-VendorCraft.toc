@@ -1,12 +1,13 @@
 ## Interface: 11200
 ## Title: aux |cff66ccffVendorCraft|r
 ## Notes: aux tab: scan the auction house, find crafts that sell to a vendor for profit, and buy the mats in matching amounts
-## Version: 0.1.0
+## Version: 0.2.0
 ## Dependencies: aux-addon
 ## OptionalDeps: Atlas-CFM, Bagshui, ShaguTweaks, pfUI, pfQuest, pfQuest-turtle, CraftTree
 ## SavedVariables: AuxVendorCraftDB
 
 core.lua
+spell_names.lua
 octo_prices.lua
 vendor_buy.lua
 prices.lua

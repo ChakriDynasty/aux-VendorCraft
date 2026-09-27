@@ -90,39 +90,107 @@ function atlas_spell_info()
 	return info
 end
 
+function fold_name(s)
+	s = strlower(s or '')
+	s = gsub(s, '^pattern: ', '')
+	s = gsub(s, '^plans: ', '')
+	s = gsub(s, '^recipe: ', '')
+	s = gsub(s, '^formula: ', '')
+	s = gsub(s, '^schematic: ', '')
+	s = gsub(s, '^manual: ', '')
+	return s
+end
+
+function names_equal(a, b)
+	return a and b and fold_name(a) == fold_name(b)
+end
+
+function is_process(name)
+	local s = fold_name(name)
+	return strfind(s, '^smelt ') or strfind(s, '^transmute') or strfind(s, 'reloaded') or strfind(s, '^create ')
+end
+
+function cached_item_id(name)
+	local ids = aux.account_data and aux.account_data.item_ids
+	return name and ids and ids[strlower(name)]
+end
+
+function spell_title(spell, data)
+	if type(data.name) == 'string' and data.name ~= '' then
+		return data.name
+	end
+	return SPELL_NAMES and SPELL_NAMES[spell]
+end
+
+-- Atlas-CFM reuses some item ids (Scroll of Thorns is stored as the same
+-- id as Dragonscale Leggings). Keep a recipe only when the spell name
+-- matches the item, or when it is a known process for that item (smelt,
+-- transmute). Otherwise try aux's name cache, then skip.
+function pick_product(title, item, owners)
+	local seen = item and item_name(item)
+	local loaded = seen and not strfind(seen, '^item:')
+	if item and not loaded and queue_item_load then
+		queue_item_load(item)
+	end
+	if title and loaded and names_equal(title, seen) then
+		return item, title
+	end
+	if title then
+		local by_name = cached_item_id(title)
+		if by_name then
+			return by_name, title
+		end
+	end
+	if item and owners[item] and owners[item] > 1 then
+		if is_process(title) then
+			return item, title or seen
+		end
+		return
+	end
+	if item then
+		return item, title or seen
+	end
+end
+
+function reset_atlas_cache()
+	atlas_recipes = nil
+end
+
 -- The whole database, keyed like unknown_recipes. Nil when Atlas-CFM is absent.
 function atlas_recipe_list()
 	if atlas_recipes then return atlas_recipes end
 	if not atlas_available() then return end
 	local info = atlas_spell_info()
-	local recipes = {}
+	local rows, owners = {}, {}
 	for spell, data in _G.AtlasCFM.SpellDB.craftspells do
-		-- Turtle corrections override the vanilla reagent list.
 		local raw = data.reagents_TURTLE1 or data.reagents_TURTLE or data.reagents
 		if data.item and raw and getn(raw) > 0 then
-			local about = info[spell] or EMPTY
-			local name = data.name
-			if type(name) ~= 'string' or name == '' then
-				name = item_name(data.item)
+			tinsert(rows, {spell = spell, data = data, raw = raw, title = spell_title(spell, data)})
+			owners[data.item] = (owners[data.item] or 0) + 1
+		end
+	end
+	local recipes = {}
+	for i = 1, getn(rows) do
+		local row = rows[i]
+		local product, name = pick_product(row.title, row.data.item, owners)
+		if name and product and not strfind(name, '^Enchant ') then
+			local reagents = {}
+			for _, pair in row.raw do
+				if pair[1] then
+					tinsert(reagents, {id = pair[1], count = pair[2] or 1})
+				end
 			end
-			if name and not strfind(name, '^Enchant ') then
-				local reagents = {}
-				for _, pair in raw do
-					if pair[1] then
-						tinsert(reagents, {id = pair[1], count = pair[2] or 1})
-					end
-				end
-				if getn(reagents) > 0 then
-					recipes[name .. '#' .. spell] = {
-						name = name,
-						product = data.item,
-						made = max(1, about.yield or 1),
-						reagents = reagents,
-						prof = about.prof,
-						skill = about.skill,
-						cooldown = has_cooldown(name) or nil,
-					}
-				end
+			if getn(reagents) > 0 then
+				local about = info[row.spell] or EMPTY
+				recipes[name .. '#' .. row.spell] = {
+					name = name,
+					product = product,
+					made = max(1, about.yield or 1),
+					reagents = reagents,
+					prof = about.prof,
+					skill = about.skill,
+					cooldown = has_cooldown(name) or nil,
+				}
 			end
 		end
 	end

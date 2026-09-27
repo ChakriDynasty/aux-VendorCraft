@@ -572,6 +572,16 @@ end
 -- Cap one recipe at n crafts, or clear the cap when n is nil, 0, or at least
 -- the automatic best. Never plans more than that best.
 function set_craft_count(name, n)
+	if type(n) == 'string' then n = tonumber(n) end
+	if n then n = floor(n) end
+	if n and n < 1 then n = nil end
+	-- Store the cap even if the current plan is mid-refresh, so a replan
+	-- (or Buy) still sees it.
+	if n then
+		craft_limits[name] = n
+	else
+		craft_limits[name] = nil
+	end
 	local list = current_results()
 	local sup = current_supply()
 	if not list or not sup then return end
@@ -583,17 +593,14 @@ function set_craft_count(name, n)
 	end
 	if not plan then return end
 	local natural = plan.natural_crafts or plan.crafts
-	if type(n) == 'string' then n = tonumber(n) end
-	if n then n = floor(n) end
 	if n and n > natural then n = natural end
 	local clearing = not n or n < 1 or n >= natural
 	if clearing then
 		craft_limits[name] = nil
 		if not plan.user_limited then return plan end
 		n = nil
-	else
-		craft_limits[name] = n
-		if plan.user_limited and plan.crafts == n then return plan end
+	elseif plan.user_limited and plan.crafts == n then
+		return plan
 	end
 	local updated = retarget(plan, sup, n, view ~= 'other')
 	list[index] = updated

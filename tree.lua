@@ -255,13 +255,24 @@ function each_node(entries, f, depth)
 end
 
 -- Crafts to do in order: deepest intermediates first, the plan's own recipe last.
+-- `n` is how many of the final recipe were actually bought for.
 function craft_steps(plan, n)
 	local steps = {}
+	local scale = 1
+	if n and plan.crafts and plan.crafts > 0 then
+		scale = n / plan.crafts
+	end
 	local function walk(entries)
 		for _, entry in ipairs(entries) do
 			if entry.craft then
 				walk(entry.craft.reagents)
-				tinsert(steps, {name = entry.craft.name, n = entry.craft.crafts, known = entry.craft.known})
+				local crafts = entry.craft.crafts
+				if scale ~= 1 then
+					crafts = floor(crafts * scale + .5)
+				end
+				if crafts > 0 then
+					tinsert(steps, {name = entry.craft.name, n = crafts, known = entry.craft.known})
+				end
 			end
 		end
 	end
