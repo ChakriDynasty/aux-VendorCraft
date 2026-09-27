@@ -620,6 +620,12 @@ function request_plan()
 	allow_price_followup()
 end
 
+function cancel_plan()
+	plan_requested, plan_stale = false, false
+	plan_co = nil
+	planner_running = false
+end
+
 function busy()
 	return scanning or buying or plan_co
 end
@@ -654,7 +660,7 @@ function view_summary()
 end
 
 on_tick(function()
-	if plan_requested and not plan_co and not buying and db then
+	if plan_requested and not plan_co and not buying and not scanning and db then
 		plan_requested, plan_stale = false, false
 		plan_co = coroutine.create(plan_everything)
 	end

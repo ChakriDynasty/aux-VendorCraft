@@ -98,6 +98,13 @@ function stop_scan()
 end
 
 function start_scan(resume)
+	-- Scan AH is always allowed: drop a recipe check or a buy so the
+	-- auction house query can start right away.
+	cancel_plan()
+	suppress_plan = true
+	if buying then stop_buying() end
+	if scanning then stop_scan() end
+	suppress_plan = nil
 	if scanning or buying then return end
 	load_book()
 	local first_page = 0
@@ -170,5 +177,7 @@ function finish_scan(complete)
 	else
 		set_status(1, format('Scan stopped at page %d of %d - press Resume to continue', (book_meta.next_page or 0) + 1, book_meta.total_pages or 0))
 	end
-	request_plan()
+	if not suppress_plan then
+		request_plan()
+	end
 end

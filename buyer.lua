@@ -399,5 +399,7 @@ function finish_buying()
 	set_status(1, format('Bought %d auctions for %s', job.auctions, money_text(job.cash)))
 	last_job = job
 	job = nil
-	request_plan()
+	if not suppress_plan then
+		request_plan()
+	end
 end

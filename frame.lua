@@ -408,7 +408,7 @@ end
 
 function refresh_controls()
 	local is_busy = busy()
-	if is_busy then scan_button:Disable() else scan_button:Enable() end
+	scan_button:Enable()
 	if is_busy then refresh_button:Disable() else refresh_button:Enable() end
 	if scanning or buying then
 		stop_button:Show()
