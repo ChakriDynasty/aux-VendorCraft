@@ -154,6 +154,7 @@ end
 
 function reset_atlas_cache()
 	atlas_recipes = nil
+	shop_atlas_by_item = nil
 end
 
 -- The whole database, keyed like unknown_recipes. Nil when Atlas-CFM is absent.

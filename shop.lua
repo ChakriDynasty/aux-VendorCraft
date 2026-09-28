@@ -172,14 +172,80 @@ function shop_buy_leaf(sup, node, missing)
 	end
 end
 
--- Bars become ore, bolts become cloth. Other crafts are left as the item
--- the recipe actually lists.
-function shop_can_break_down(maker)
-	if not maker then return end
-	local name = fold_name(maker.name or '')
-	if strfind(name, 'smelt ') or strfind(name, '^bolt of ') then
-		return true
+-- Essences that transmute into each other. CraftTree does not expand these.
+SHOP_TRANSMUTE_LOOP = {
+	[7076] = true,
+	[7078] = true,
+	[7080] = true,
+	[7082] = true,
+	[12803] = true,
+	[12808] = true,
+}
+
+function shop_reagent_parts(reagent)
+	local id = reagent.id or reagent[1]
+	local count = reagent.count or reagent[2] or 1
+	return id, count
+end
+
+function shop_rows_for(id)
+	local db = _G.CraftTreeDB
+	if db and db[id] and getn(db[id]) > 0 then
+		return db[id]
 	end
+	local list = atlas_recipe_list()
+	if not list then return end
+	if not shop_atlas_by_item then
+		shop_atlas_by_item = {}
+		for _, recipe in list do
+			if recipe.product then
+				local bucket = shop_atlas_by_item[recipe.product]
+				if not bucket then
+					bucket = {}
+					shop_atlas_by_item[recipe.product] = bucket
+				end
+				tinsert(bucket, recipe)
+			end
+		end
+	end
+	return shop_atlas_by_item[id]
+end
+
+-- The recipe that really makes this item, from CraftTree when it is loaded.
+-- A shared item id is kept only when the spell name is the item, or it is
+-- the smelt / bolt recipe. Anything else is bought as itself.
+function shop_pick_recipe(id)
+	if is_leather_grade(id) or SHOP_TRANSMUTE_LOOP[id] then return end
+	local rows = shop_rows_for(id)
+	if not rows then return end
+	local item = item_name(id)
+	local named, process, only
+	local single = getn(rows) == 1
+	for i = 1, getn(rows) do
+		local row = rows[i]
+		local reagents = row.reagents
+		if reagents and getn(reagents) > 0 and not recipe_on_cooldown(row.name, row) then
+			local folded = fold_name(row.name)
+			if not strfind(folded, '^transmute') then
+				if item and not strfind(item, '^item:') and names_equal(row.name, item) then
+					named = row
+				elseif strfind(folded, 'smelt ') or strfind(folded, '^bolt of ') then
+					process = process or row
+				elseif single then
+					only = row
+				end
+			end
+		end
+	end
+	local picked = named or process or only
+	if not picked then return end
+	if vendor_buy(id) then
+		local folded = fold_name(picked.name)
+		if not strfind(folded, 'smelt ') and not strfind(folded, '^bolt of ') then
+			return
+		end
+	end
+	return picked
 end
 
 -- Expand a crafted reagent into its own reagents, down to mats that are not
@@ -209,28 +275,19 @@ function shop_node(sup, id, per, need, depth, path, name)
 		cash = 0,
 		net = 0,
 	}
-	local maker = sup.makers[id]
-	if not shop_can_break_down(maker) then maker = nil end
-	-- An unlimited vendor (thread, dye, vials, salt) is a basic mat: buy it
-	-- there, or on the AH only when the auction is cheaper. Do not craft it.
-	local from_vendor = vendor_buy(id)
-	-- Only smelts and cloth bolts are broken down. Any other recipe that
-	-- happens to share an item id (Iron Lantern's bars are not bronze, and
-	-- wool is not a shadewood craft) is bought as itself.
-	if missing <= 0 or from_vendor or not maker or depth >= 8 or path[id] then
+	local recipe = shop_pick_recipe(id)
+	if missing <= 0 or not recipe or depth >= 8 or path[id] then
 		if missing > 0 then shop_buy_leaf(sup, node, missing) end
 		return node
 	end
-	local recipe = maker.recipe
-	local yield = recipe.made or 1
+	local yield = recipe.yield or recipe.made or 1
 	local batches = ceil(missing / yield)
 	local children, cash = {}, 0
 	path[id] = true
 	for i = 1, getn(recipe.reagents or EMPTY) do
-		local reagent = recipe.reagents[i]
-		local rid = reagent_id(reagent)
+		local rid, rcount = shop_reagent_parts(recipe.reagents[i])
 		if rid then
-			local child = shop_node(sup, rid, reagent.count or 1, batches * (reagent.count or 1), depth + 1, path, reagent.name)
+			local child = shop_node(sup, rid, rcount, batches * rcount, depth + 1, path, recipe.reagents[i].name)
 			tinsert(children, child)
 			cash = cash + (child.cash or 0)
 		end
@@ -239,10 +296,8 @@ function shop_node(sup, id, per, need, depth, path, name)
 	node.cash = cash
 	node.net = use * node.salvage + cash
 	node.craft = {
-		name = maker.name,
-		known = maker.known,
-		prof = recipe.prof,
-		skill = recipe.skill,
+		name = recipe.name,
+		known = character and character.recipes and character.recipes[recipe.name] and true or false,
 		crafts = batches,
 		yield = yield,
 		units = batches * yield,
@@ -257,12 +312,21 @@ function expand_shop(sup, target, qty)
 	local entries, path = {}, {}
 	qty = qty or 1
 	if target.kind == 'recipe' and target.recipe then
-		if target.recipe.product then path[target.recipe.product] = true end
-		for i = 1, getn(target.recipe.reagents or EMPTY) do
-			local reagent = target.recipe.reagents[i]
-			local rid = reagent_id(reagent)
+		local product = target.recipe.product or target.id
+		local checked = product and shop_pick_recipe(product)
+		local reagents = target.recipe.reagents
+		local yield = target.recipe.made or target.recipe.yield or 1
+		if checked and (names_equal(checked.name, target.name) or names_equal(checked.name, item_name(product))) then
+			reagents = checked.reagents
+			yield = checked.yield or checked.made or 1
+		end
+		if product then path[product] = true end
+		local batches = ceil(qty / yield)
+		for i = 1, getn(reagents or EMPTY) do
+			local reagent = reagents[i]
+			local rid, rcount = shop_reagent_parts(reagent)
 			if rid then
-				tinsert(entries, shop_node(sup, rid, reagent.count or 1, qty * (reagent.count or 1), 0, path, reagent.name))
+				tinsert(entries, shop_node(sup, rid, rcount, batches * rcount, 0, path, reagent.name))
 			end
 		end
 	elseif target.id then
