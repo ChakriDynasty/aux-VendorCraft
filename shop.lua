@@ -172,6 +172,16 @@ function shop_buy_leaf(sup, node, missing)
 	end
 end
 
+-- Bars become ore, bolts become cloth. Other crafts are left as the item
+-- the recipe actually lists.
+function shop_can_break_down(maker)
+	if not maker then return end
+	local name = fold_name(maker.name or '')
+	if strfind(name, 'smelt ') or strfind(name, '^bolt of ') then
+		return true
+	end
+end
+
 -- Expand a crafted reagent into its own reagents, down to mats that are not
 -- themselves crafted. Leather grades and cooldown recipes are already left
 -- out of the maker list, same as the Vendor tab.
@@ -200,11 +210,13 @@ function shop_node(sup, id, per, need, depth, path, name)
 		net = 0,
 	}
 	local maker = sup.makers[id]
+	if not shop_can_break_down(maker) then maker = nil end
 	-- An unlimited vendor (thread, dye, vials, salt) is a basic mat: buy it
 	-- there, or on the AH only when the auction is cheaper. Do not craft it.
 	local from_vendor = vendor_buy(id)
-	-- Deeper than the Vendor tab on purpose: a shopping list should reach the
-	-- ore, cloth, or herb, not stop on the bar or bolt.
+	-- Only smelts and cloth bolts are broken down. Any other recipe that
+	-- happens to share an item id (Iron Lantern's bars are not bronze, and
+	-- wool is not a shadewood craft) is bought as itself.
 	if missing <= 0 or from_vendor or not maker or depth >= 8 or path[id] then
 		if missing > 0 then shop_buy_leaf(sup, node, missing) end
 		return node
