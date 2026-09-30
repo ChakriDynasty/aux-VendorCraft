@@ -118,21 +118,26 @@ function clear_shop_taken(auctions)
 end
 
 function shop_owned(bag, extra)
-	local owned = {}
-	local mine, mail = bag and bag.mine, bag and bag.mail
-	if not bag then
-		mine = owned_snapshot()
+	local mine, alts, mail
+	if bag then
+		mine, mail = bag.mine, bag.mail
+		alts = EMPTY
+	else
+		mine, alts = owned_snapshot()
 		mail = mail_counts()
 	end
-	for id, n in mine or EMPTY do
-		owned[id] = (owned[id] or 0) + n
+	local owned, seen = {}, {}
+	local function consider(id)
+		if not id or seen[id] then return end
+		seen[id] = true
+		local n = counted_owned(id, mine, alts, mail)
+		if extra and extra[id] then n = n + extra[id] end
+		if n > 0 then owned[id] = n end
 	end
-	for id, n in mail or EMPTY do
-		owned[id] = (owned[id] or 0) + n
-	end
-	for id, n in extra or EMPTY do
-		owned[id] = (owned[id] or 0) + n
-	end
+	for id in mine or EMPTY do consider(id) end
+	for id in mail or EMPTY do consider(id) end
+	for id in alts or EMPTY do consider(id) end
+	for id in extra or EMPTY do consider(id) end
 	return owned
 end
 

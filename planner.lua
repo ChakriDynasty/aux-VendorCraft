@@ -355,6 +355,10 @@ function build_plan(name, recipe, sup, ctxs, n, value, verified, path)
 		end
 	end)
 	plan.profit = plan.revenue - net
+	plan.uses_owned = false
+	each_node(entries, function(entry)
+		if (entry.owned or 0) > 0 then plan.uses_owned = true end
+	end)
 	return plan
 end
 
@@ -382,7 +386,7 @@ function build_supply(recipes, market_only, allow_database, force_owned)
 	if not market_only then
 		for id in ids do
 			if settings.use_owned then
-				owned[id] = (mine[id] or 0) + (mail[id] or 0)
+				owned[id] = counted_owned(id, mine, alts, mail)
 			elseif force_owned then
 				owned[id] = character.mail.bought[id] or 0
 			end
@@ -571,6 +575,72 @@ end
 
 -- Cap one recipe at n crafts, or clear the cap when n is nil, 0, or at least
 -- the automatic best. Never plans more than that best.
+-- How many of this item Bagshui may contribute. Skip list and a typed
+-- quantity override the full stack. Nil cap means "all of them".
+function counted_owned(id, mine, alts, mail)
+	if not settings.use_owned then return 0 end
+	if settings.owned_skip and settings.owned_skip[id] then return 0 end
+	local n = (mine and mine[id] or 0) + (mail and mail[id] or 0)
+	for _, count in alts and alts[id] or EMPTY do
+		n = n + count
+	end
+	local cap = settings.owned_qty and settings.owned_qty[id]
+	if cap and cap >= 0 then n = min(n, cap) end
+	return n
+end
+
+function toggle_owned_mat(id)
+	if not id then return end
+	settings.owned_skip[id] = not settings.owned_skip[id] or nil
+	request_plan()
+end
+
+function set_owned_qty(id, n)
+	if not id then return end
+	if type(n) == 'string' then n = tonumber(n) end
+	if n then n = floor(n) end
+	if not n or n < 0 then
+		settings.owned_qty[id] = nil
+	else
+		settings.owned_qty[id] = n
+		settings.owned_skip[id] = nil
+	end
+	request_plan()
+end
+
+-- How many crafts the mats you already have can finish. Reagents you do
+-- not own, or that you turned off, are ignored here; those are what Buy
+-- still has to purchase.
+function owned_craft_cap(plan)
+	if not plan or not plan.recipe then return end
+	local mine, alts = owned_snapshot()
+	local mail = mail_counts()
+	local cap
+	for i = 1, getn(plan.recipe.reagents or EMPTY) do
+		local reagent = plan.recipe.reagents[i]
+		local id = reagent_id(reagent)
+		local each = reagent.count or 1
+		if id and each > 0 then
+			local have = counted_owned(id, mine, alts, mail)
+			if have > 0 then
+				local n = floor(have / each)
+				cap = cap and min(cap, n) or n
+			end
+		end
+	end
+	if cap and cap >= 1 then return cap end
+end
+
+function match_owned_crafts(plan)
+	local n = owned_craft_cap(plan)
+	if not n then
+		say('Bagshui has none of the reagents for ' .. (plan and plan.name or 'this recipe') .. '.')
+		return
+	end
+	set_craft_count(plan.name, n)
+	say(format('%s set to %d crafts, from the reagents you already have.', plan.name, n))
+end
+
 function set_craft_count(name, n)
 	if type(n) == 'string' then n = tonumber(n) end
 	if n then n = floor(n) end

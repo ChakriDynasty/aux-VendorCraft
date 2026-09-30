@@ -91,6 +91,7 @@ end
 
 function plan_row(plan)
 	local name = colored_item_name(plan.product, plan.name) .. (plan.yield > 1 and gray(' x' .. plan.yield) or '')
+	if plan.uses_owned then name = name .. gray(' [bag]') end
 	local crafts = plan.unlimited and (plan.crafts .. '+') or tostring(plan.crafts)
 	local vendor = money_text(plan.revenue) .. (plan.verified and '' or gray('*'))
 	local profit = money_text(plan.profit, aux.color.green)
@@ -115,6 +116,7 @@ function update_results()
 	results_listing:SetData(rows)
 	update_details()
 	show_craft_box()
+	show_mat_box()
 end
 
 function switch_view()
@@ -158,6 +160,7 @@ function update_details()
 				{value = indent .. colored_item_name(reagent.id, reagent.name) .. gray(' x' .. reagent.q)},
 				{value = tostring(reagent.need)},
 				{value = count_text(reagent.owned + (reagent.reused or 0))},
+				{value = owned_use_text(reagent.id)},
 				{value = reagent.ah_units > 0 and format('AH %d (%s)', reagent.ah_units, money_text(reagent.ah_cash)) or gray('-')},
 				{value = reagent.vendor > 0 and format('Vendor %d (%s)', reagent.vendor, money_text(reagent.vendor * (reagent.vendor_price or 0))) or gray('-')},
 				{value = craft_text(reagent)},
@@ -170,6 +173,59 @@ function update_details()
 	details_listing:SetData(rows)
 	if vendor_hint then
 		vendor_hint:SetText(vendor_hint_text(plan))
+	end
+end
+
+function owned_use_text(id)
+	if not settings.use_owned or (settings.owned_skip and settings.owned_skip[id]) then
+		return gray('no')
+	end
+	local cap = settings.owned_qty and settings.owned_qty[id]
+	if cap then return aux.color.green(tostring(cap)) end
+	return aux.color.green('all')
+end
+
+function bag_have_text(id)
+	local mine, alts = owned_snapshot()
+	local mail = mail_counts()
+	local n = (mine[id] or 0) + (mail[id] or 0)
+	for _, count in alts[id] or EMPTY do
+		n = n + count
+	end
+	return n
+end
+
+function show_mat_box()
+	if not mat_name_label then return end
+	local id = selected_owned_id
+	if not id then
+		mat_name_label:SetText('Click a reagent')
+		if mat_qty_box and not mat_qty_box.focused then mat_qty_box:SetText('') end
+		return
+	end
+	mat_name_label:SetText(item_name(id))
+	if mat_use_check then
+		local on = settings.use_owned and not (settings.owned_skip and settings.owned_skip[id])
+		mat_use_check:SetChecked(on and 1 or nil)
+	end
+	if mat_qty_box and not mat_qty_box.focused then
+		local cap = settings.owned_qty and settings.owned_qty[id]
+		mat_qty_updating = true
+		mat_qty_box:SetText(cap and tostring(cap) or '')
+		mat_qty_updating = nil
+	end
+	if mat_have_label then
+		mat_have_label:SetText('/ ' .. bag_have_text(id))
+	end
+end
+
+function apply_mat_qty()
+	if mat_qty_updating or not selected_owned_id or not mat_qty_box then return end
+	local text = mat_qty_box:GetText() or ''
+	if text == '' then
+		set_owned_qty(selected_owned_id, nil)
+	else
+		set_owned_qty(selected_owned_id, tonumber(text))
 	end
 end
 
@@ -553,13 +609,20 @@ function aux.handle.INIT_UI()
 	do
 		local label = gui.label(top, gui.font_size.small)
 		label:SetPoint('RIGHT', -8, 0)
-		label:SetText('Use my mats')
+		label:SetText('Owned mats')
 		local checkbox = gui.checkbox(top)
 		checkbox:SetPoint('RIGHT', label, 'LEFT', -2, 0)
 		checkbox:SetScript('OnClick', function()
 			settings.use_owned = this:GetChecked() and true or false
 			request_plan()
 		end)
+		checkbox:SetScript('OnEnter', function()
+			GameTooltip:SetOwner(checkbox, 'ANCHOR_RIGHT')
+			GameTooltip:AddLine('Calculate with owned mats', 1, 1, 1)
+			GameTooltip:AddLine('Recipes use what Bagshui says you and your alts already have, even when the auction house has fewer.', 1, .82, 0, 1)
+			GameTooltip:Show()
+		end)
+		checkbox:SetScript('OnLeave', function() GameTooltip:Hide() end)
 		owned_checkbox = checkbox
 	end
 	reserve_box = money_box(top, 'gold_reserve', 'Keep')
@@ -593,21 +656,36 @@ function aux.handle.INIT_UI()
 	details_body:SetPoint('TOPLEFT', details_head, 'BOTTOMLEFT', -4, -2)
 	details_body:SetPoint('BOTTOMRIGHT', details_foot, 'TOPRIGHT', 4, 2)
 
-	craft_box = gui.editbox(details_head)
-	gui.set_size(craft_box, 52, 22)
-	craft_box:SetPoint('LEFT', 48, 0)
-	craft_box:SetAlignment('RIGHT')
-	craft_box:SetNumeric(true)
-	craft_box:EnableMouse(true)
-	craft_box:SetFrameLevel((details_head:GetFrameLevel() or 1) + 8)
-	craft_box.enter = function() craft_box:ClearFocus() end
-	craft_box.focus_loss = function() apply_craft_box() end
-	local craft_label = gui.label(details_head, gui.font_size.small)
-	craft_label:SetPoint('RIGHT', craft_box, 'LEFT', -4, 0)
-	craft_label:SetText('Craft')
-	craft_max_label = gui.label(details_head, gui.font_size.small)
-	craft_max_label:SetPoint('LEFT', craft_box, 'RIGHT', 4, 0)
-	craft_max_label:SetText('')
+	mat_name_label = gui.label(details_head, gui.font_size.small)
+	mat_name_label:SetPoint('LEFT', 4, 0)
+	mat_name_label:SetWidth(180)
+	mat_name_label:SetJustifyH('LEFT')
+	mat_name_label:SetText('Click a reagent')
+	local mat_use_label = gui.label(details_head, gui.font_size.small)
+	mat_use_label:SetPoint('LEFT', mat_name_label, 'RIGHT', 8, 0)
+	mat_use_label:SetText('Use')
+	mat_use_check = gui.checkbox(details_head)
+	mat_use_check:SetPoint('LEFT', mat_use_label, 'RIGHT', 2, 0)
+	mat_use_check:SetScript('OnClick', function()
+		if not selected_owned_id then return end
+		settings.owned_skip[selected_owned_id] = not this:GetChecked() or nil
+		request_plan()
+	end)
+	local mat_qty_label = gui.label(details_head, gui.font_size.small)
+	mat_qty_label:SetPoint('LEFT', mat_use_check, 'RIGHT', 8, 0)
+	mat_qty_label:SetText('Qty')
+	mat_qty_box = gui.editbox(details_head)
+	gui.set_size(mat_qty_box, 44, 22)
+	mat_qty_box:SetPoint('LEFT', mat_qty_label, 'RIGHT', 4, 0)
+	mat_qty_box:SetAlignment('RIGHT')
+	mat_qty_box:SetNumeric(true)
+	mat_qty_box:EnableMouse(true)
+	mat_qty_box:SetFrameLevel((details_head:GetFrameLevel() or 1) + 8)
+	mat_qty_box.enter = function() mat_qty_box:ClearFocus() end
+	mat_qty_box.focus_loss = function() apply_mat_qty() end
+	mat_have_label = gui.label(details_head, gui.font_size.small)
+	mat_have_label:SetPoint('LEFT', mat_qty_box, 'RIGHT', 4, 0)
+	mat_have_label:SetText('')
 
 	vendor_hint = gui.label(details_foot, gui.font_size.small)
 	vendor_hint:SetPoint('LEFT', 4, 0)
@@ -617,15 +695,21 @@ function aux.handle.INIT_UI()
 
 	details_listing = listing.new(details_body)
 	details_listing:SetColInfo{
-		{name = 'Reagent', width = .26, align = 'LEFT'},
+		{name = 'Reagent', width = .23, align = 'LEFT'},
 		{name = 'Need', width = .06, align = 'CENTER'},
 		{name = 'Have', width = .06, align = 'CENTER'},
-		{name = 'AH', width = .18, align = 'CENTER'},
+		{name = 'Use', width = .07, align = 'CENTER'},
+		{name = 'AH', width = .16, align = 'CENTER'},
 		{name = 'Vendor', width = .18, align = 'CENTER'},
 		{name = 'Craft', width = .10, align = 'CENTER'},
 		{name = 'Spare', width = .07, align = 'CENTER'},
 		{name = 'Alts', width = .09, align = 'CENTER'},
 	}
+	details_listing:SetHandler('OnClick', function(st, data)
+		if not data.reagent then return end
+		selected_owned_id = data.reagent.id
+		show_mat_box()
+	end)
 	details_listing:SetHandler('OnEnter', function(st, data, row) show_reagent_tooltip(data.reagent, row) end)
 	details_listing:SetHandler('OnLeave', function() GameTooltip:Hide() end)
 
@@ -633,15 +717,55 @@ function aux.handle.INIT_UI()
 	-- (about 150px from the right edge).
 	do
 		status_bar = gui.status_bar(frame)
-		status_bar:SetWidth(250)
+		status_bar:SetWidth(165)
 		status_bar:SetHeight(25)
 		status_bar:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 0, -6)
 		status_bar:update_status(1, 1)
 		status_bar:set_text('')
 	end
 	do
+		local craft_anchor = CreateFrame('Frame', nil, frame)
+		craft_anchor:SetPoint('TOPLEFT', status_bar, 'TOPRIGHT', 4, 0)
+		craft_anchor:SetWidth(150)
+		craft_anchor:SetHeight(24)
+		craft_anchor:SetFrameLevel((frame:GetFrameLevel() or 1) + 20)
+		local craft_label = gui.label(craft_anchor, gui.font_size.small)
+		craft_label:SetPoint('LEFT', 0, 0)
+		craft_label:SetText('Craft')
+		craft_box = gui.editbox(craft_anchor)
+		gui.set_size(craft_box, 40, 22)
+		craft_box:SetPoint('LEFT', craft_label, 'RIGHT', 4, 0)
+		craft_box:SetAlignment('RIGHT')
+		craft_box:SetNumeric(true)
+		craft_box:EnableMouse(true)
+		craft_box:SetFrameLevel(craft_anchor:GetFrameLevel() + 2)
+		craft_box.enter = function() craft_box:ClearFocus() end
+		craft_box.focus_loss = function() apply_craft_box() end
+		craft_max_label = gui.label(craft_anchor, gui.font_size.small)
+		craft_max_label:SetPoint('LEFT', craft_box, 'RIGHT', 3, 0)
+		craft_max_label:SetText('')
+	end
+	do
 		local btn = gui.button(frame)
-		btn:SetPoint('TOPLEFT', status_bar, 'TOPRIGHT', 5, 0)
+		btn:SetPoint('LEFT', craft_box, 'RIGHT', 36, 0)
+		btn:SetPoint('TOP', status_bar, 'TOP', 0, 0)
+		gui.set_size(btn, 52, 24)
+		btn:SetText('Match')
+		btn:SetScript('OnClick', function()
+			if selected_plan then match_owned_crafts(selected_plan) end
+		end)
+		btn:SetScript('OnEnter', function()
+			GameTooltip:SetOwner(btn, 'ANCHOR_RIGHT')
+			GameTooltip:AddLine('Match my mats', 1, 1, 1)
+			GameTooltip:AddLine('Set the craft count to what Bagshui can already finish, then buy only the reagents you are short.', 1, .82, 0, 1)
+			GameTooltip:Show()
+		end)
+		btn:SetScript('OnLeave', function() GameTooltip:Hide() end)
+		match_button = btn
+	end
+	do
+		local btn = gui.button(frame)
+		btn:SetPoint('TOPLEFT', match_button, 'TOPRIGHT', 5, 0)
 		gui.set_size(btn, 95, 24)
 		btn:SetText('Buy selected')
 		btn:SetScript('OnClick', function()

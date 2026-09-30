@@ -3,7 +3,7 @@ module 'aux.tabs.vendorcraft'
 local aux = require 'aux'
 local money = require 'aux.util.money'
 
-M.VERSION = '0.3.7'
+M.VERSION = '0.3.9'
 
 DEFAULTS = {
 	min_profit = 500,
@@ -48,6 +48,8 @@ function aux.handle.LOAD()
 	db.prices = db.prices or {}
 	db.settings = db.settings or {}
 	settings = db.settings
+	settings.owned_skip = settings.owned_skip or {}
+	settings.owned_qty = settings.owned_qty or {}
 	for k, v in DEFAULTS do
 		if settings[k] == nil then
 			settings[k] = v

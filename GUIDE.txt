@@ -1,0 +1,167 @@
+aux-VendorCraft guide
+=====================
+
+This is the setup for the PC you play on. The Mac only builds the addon.
+The game will not see a new version until Octo Updater installs it into
+the PC's game folder.
+
+
+1. Install Octo Updater
+-----------------------
+
+Octo Updater is the Windows program that downloads the game, the client
+mods, and addons.
+
+1. Open the updater page:
+   https://octowow.st/git/Microchip/octo-updater
+
+2. Download OctoUpdater.exe from the latest release linked in that readme:
+   https://github.com/rebasedkon/octo-updater/releases/latest
+
+3. Put the exe in its own folder, for example C:\Octo. Do not put it
+   inside Downloads and then move it later. The game folder it creates
+   sits next to the exe.
+
+4. If Windows shows "Windows protected your PC", click More info, then
+   Run anyway. That is SmartScreen on the exe itself. It is not the
+   auction-house mod yet.
+
+5. In the updater, open Settings (the gear). Set Game folder to your
+   Octo game folder. If you do not have one yet, leave the default. It
+   creates the folder next to the exe.
+
+6. Click UPDATE. When it finishes, PLAY starts the game.
+
+
+2. Stop Windows from deleting the fast auction scan
+---------------------------------------------------
+
+The fast scan is a client mod called AuctionQueryThrottle. It removes
+the 5 second wait between auction searches. Vanilla waits 5 seconds
+even after the server has already answered. On Octo the server allows
+the next search as soon as the last one returns, so this mod makes a
+full scan run at the speed of your connection.
+
+Project page:
+https://github.com/brues-code/AuctionQueryThrottle
+
+Windows Defender treats that DLL, and the loader it needs
+(VanillaFixes), as a virus because they inject into WoW.exe. The
+updater's own error text for this is "Blocked by antivirus". The fix
+the updater ships is a Defender exclusion for the game folder only.
+You do not turn Defender off.
+
+Do this before you install the mods, or again if an install already
+failed:
+
+1. In Octo Updater, open Settings.
+2. Click "Add game folder to Defender exclusions".
+3. Windows asks for administrator permission. Click Yes. The updater
+   runs Add-MpPreference -ExclusionPath on your game folder.
+4. If a download already failed, open Windows Security, then Virus &
+   threat protection, then Protection history.
+5. Find AuctionQueryThrottle.dll or VanillaFixes.dll, open it, and
+   choose Restore.
+6. Back in the updater, install the mods again.
+
+In the updater's mod list, turn these on:
+
+- VanillaFixes. This is the DLL loader. The other mods do not load
+  without it.
+- AuctionQueryThrottle. This is the fast auction scan.
+- ClassicAPI. VendorCraft uses it for the real vendor sell price.
+
+Then click UPDATE again, and start the game from the updater's PLAY
+button so the loader is applied.
+
+
+3. Install the addons
+---------------------
+
+VendorCraft does not run by itself. In the updater's addon list,
+install these.
+
+Required:
+
+- aux. This is the auction house window. Octo's catalog uses
+  https://github.com/OldManAlpha/aux-addon
+
+- aux-VendorCraft. Add it as a custom git addon with this address:
+  https://github.com/ChakriDynasty/aux-VendorCraft
+
+Needed for the Mats tab to price recipes correctly:
+
+- CraftTree:
+  https://github.com/ChakriDynasty/CraftTree
+  The cloth counts and the other material lists are read from this.
+
+Useful, not required:
+
+- Bagshui, so the "you already have these mats" popup can see your alts.
+- Atlas-CFM, for recipes you have not learned yet.
+- pfUI, pfQuest-turtle, or ShaguTweaks, for extra vendor prices when
+  the game itself has not told the client a price.
+
+After they are installed, start the game from PLAY, log in, and type
+/vcraft. It should say v0.3.7. If it says an older number, the PC has
+not installed the new commit yet. Update the custom addon in Octo
+Updater and relog.
+
+
+4. Use VendorCraft
+------------------
+
+Open the auction house. aux opens its own window. VendorCraft adds
+three tabs: Vendor, Flip, and Mats.
+
+Scan the auction house once. On the Vendor tab, press Scan AH. With
+AuctionQueryThrottle installed, the pages move as fast as the server
+answers. Leave it until the status says the scan finished. All three
+tabs use that same saved scan.
+
+Vendor. This lists crafts you can buy materials for and sell to a
+vendor for a profit. Click a row to see the materials. The craft box
+is how many you want to make. Buy asks before it spends gold on
+materials you already have. A * on a vendor price means it came from
+a price table, not from a merchant you have opened.
+
+Flip. This lists auctions that are cheaper than what a vendor pays
+for the item. Buy them, then sell them to a vendor.
+
+Mats. This is for buying materials for a specific recipe.
+
+1. Type the item or recipe name, or shift-click an item link into
+   the box.
+2. Set Qty to how many you want to craft.
+3. Press Search.
+4. The list is what CraftTree says that recipe needs. A bar is broken
+   into its ore. A cloth bolt is broken into the right amount of
+   cloth: linen 2, wool 3, silk 4, mageweave 5, runecloth 5. Thread,
+   dye, and vials stay as vendor buys.
+5. Buy missing asks if you want to use materials you already have,
+   including Bagshui alts.
+6. The confirm box has its own quantity field. Change it there if you
+   want a different number. The mat cost updates. Then press Buy.
+
+Hovering an item in your bags shows a gold line, Vendor pays. That is
+the vendor sell price. The Value: line is aux's old auction average.
+Turn that off with:
+
+/aux tooltip value
+
+
+5. When something looks wrong
+-----------------------------
+
+- /vcraft does not say v0.3.7: update aux-VendorCraft in Octo Updater
+  on the PC, then relog.
+
+- The scan still waits about 5 seconds per page: AuctionQueryThrottle
+  is not loaded. Check that Windows did not quarantine the DLL, that
+  VanillaFixes is on, and that you launched with PLAY.
+
+- The Mats list is missing cloth counts or looks like only the raw
+  recipe: CraftTree is not enabled.
+
+- A vendor price is missing: open a merchant once with that item, or
+  install pfUI, pfQuest-turtle, or ShaguTweaks.
