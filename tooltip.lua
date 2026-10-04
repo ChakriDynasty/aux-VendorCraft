@@ -24,15 +24,17 @@ function add_vendor_line(tooltip, link, quantity)
 	tooltip:Show()
 end
 
+wrapped_tips = {}
+
 function wrap_tooltip(name, fetch)
 	local orig = GameTooltip[name]
-	if not orig or orig.vendorcraft then return end
+	if not orig or wrapped_tips[name] == orig then return end
 	local function hooked(self, a, b)
 		remember_tip(fetch(a, b))
 		orig(self, a, b)
 		remember_tip(fetch(a, b))
 	end
-	hooked.vendorcraft = true
+	wrapped_tips[name] = hooked
 	GameTooltip[name] = hooked
 end
 
@@ -109,16 +111,15 @@ function apply_vendor_hooks()
 		return id and ('item:' .. id) or nil, quantity
 	end)
 
-	if not _G.SetItemRef.vendorcraft then
+	if not item_ref_hooked then
+		item_ref_hooked = true
 		local orig_ref = _G.SetItemRef
-		local function hooked(link, text, button)
+		_G.SetItemRef = function(link, text, button)
 			orig_ref(link, text, button)
 			if link and not IsShiftKeyDown() and not IsControlKeyDown() then
 				add_vendor_line(ItemRefTooltip, link, 1)
 			end
 		end
-		hooked.vendorcraft = true
-		_G.SetItemRef = hooked
 	end
 end
 
