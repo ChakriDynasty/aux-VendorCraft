@@ -13,7 +13,8 @@ do
 		ops = ops + n
 		if ops >= YIELD_OPS then
 			ops = 0
-			if planner_running then
+			-- 1.12 has no coroutine library. Yield only when one exists.
+			if planner_running and coroutine then
 				coroutine.yield()
 			end
 		end
@@ -743,9 +744,34 @@ function view_summary()
 	return summary_mine
 end
 
+function accept_plan(run)
+	stamp_and_limit(run.plans, run.sup, true)
+	stamp_and_limit(run.other, run.other_sup, false)
+	results, last_skipped, last_supply = run.plans, run.skipped, run.sup
+	other_results, other_supply = run.other, run.other_sup
+	last_run = run
+	results_dirty = true
+	summarize(run)
+	set_status(1, view_summary())
+end
+
 on_tick(function()
-	if plan_requested and not plan_co and not buying and not scanning and not buy_prompt and db then
+	if not (plan_requested and not plan_co and not buying and not scanning and not buy_prompt and db) then
+		if not plan_co then return end
+	else
 		plan_requested, plan_stale = false, false
+		if not coroutine then
+			planner_running = true
+			local ok, run = pcall(plan_everything)
+			planner_running = false
+			if not ok then
+				set_status(1, 'Planning failed - see chat')
+				say('Planning failed: ' .. tostring(run))
+			else
+				accept_plan(run)
+			end
+			return
+		end
 		plan_co = coroutine.create(plan_everything)
 	end
 	if not plan_co then return end
@@ -758,13 +784,6 @@ on_tick(function()
 		say('Planning failed: ' .. tostring(run))
 	elseif coroutine.status(plan_co) == 'dead' then
 		plan_co = nil
-		stamp_and_limit(run.plans, run.sup, true)
-		stamp_and_limit(run.other, run.other_sup, false)
-		results, last_skipped, last_supply = run.plans, run.skipped, run.sup
-		other_results, other_supply = run.other, run.other_sup
-		last_run = run
-		results_dirty = true
-		summarize(run)
-		set_status(1, view_summary())
+		accept_plan(run)
 	end
 end)
