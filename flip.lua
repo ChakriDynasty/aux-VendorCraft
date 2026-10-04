@@ -16,6 +16,7 @@ FLIP_COLUMNS = {
 }
 
 function tab.OPEN()
+	use_vendorcraft_window(true)
 	if flip_frame then flip_frame:Show() end
 	load_book()
 	flip_dirty = true
@@ -24,6 +25,7 @@ end
 
 function tab.CLOSE()
 	if flip_frame then flip_frame:Hide() end
+	use_vendorcraft_window(false)
 end
 
 -- Auctions cheaper than what a vendor pays. Same stored scan as Vendor.
@@ -176,7 +178,7 @@ function aux.handle.INIT_UI()
 
 	local body = gui.panel(content)
 	body:SetPoint('TOPLEFT', top, 'BOTTOMLEFT', 0, -2.5)
-	body:SetPoint('BOTTOMRIGHT', 0, 0)
+	body:SetPoint('BOTTOMRIGHT', 0, 40)
 
 	flip_listing = listing.new(body)
 	flip_listing:SetColInfo(FLIP_COLUMNS)
@@ -195,14 +197,16 @@ function aux.handle.INIT_UI()
 	flip_listing:SetHandler('OnLeave', function() GameTooltip:Hide() end)
 
 	flip_status = gui.label(flip_frame, gui.font_size.small)
-	flip_status:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 0, -8)
-	flip_status:SetWidth(250)
+	flip_status:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 0, -4)
+	flip_status:SetWidth(520)
 	flip_status:SetJustifyH('LEFT')
 	flip_status:SetText('')
 
 	flip_buy = gui.button(flip_frame)
-	flip_buy:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 255, -6)
-	gui.set_size(flip_buy, 95, 24)
+	flip_buy:SetPoint('LEFT', flip_status, 'RIGHT', 16, 0)
+	flip_buy:SetPoint('TOP', aux.frame.content, 'BOTTOM', 0, -2)
+	gui.set_size(flip_buy, 120, 26)
+	flip_buy:SetFrameLevel(flip_frame:GetFrameLevel() + 20)
 	flip_buy:SetText('Buy selected')
 	flip_buy:SetScript('OnClick', function()
 		if selected_flip then request_buy({flip_to_plan(selected_flip)}) end
@@ -210,7 +214,7 @@ function aux.handle.INIT_UI()
 
 	flip_buy_all = gui.button(flip_frame)
 	flip_buy_all:SetPoint('TOPLEFT', flip_buy, 'TOPRIGHT', 5, 0)
-	gui.set_size(flip_buy_all, 65, 24)
+	gui.set_size(flip_buy_all, 90, 26)
 	flip_buy_all:SetText('Buy all')
 	flip_buy_all:SetScript('OnClick', function()
 		local plans = {}

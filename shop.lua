@@ -24,12 +24,14 @@ NEED_COLUMNS = {
 }
 
 function tab.OPEN()
+	use_vendorcraft_window(true)
 	if shop_frame then shop_frame:Show() end
 	refresh_shop_controls()
 end
 
 function tab.CLOSE()
 	if shop_frame then shop_frame:Hide() end
+	use_vendorcraft_window(false)
 end
 
 function tab.CLICK_LINK(item_info)
@@ -224,8 +226,7 @@ function shop_pick_recipe(id)
 	local rows = shop_rows_for(id)
 	if not rows then return end
 	local item = item_name(id)
-	local named, process, only
-	local single = getn(rows) == 1
+	local named, process
 	for i = 1, getn(rows) do
 		local row = rows[i]
 		local reagents = row.reagents
@@ -236,13 +237,11 @@ function shop_pick_recipe(id)
 					named = row
 				elseif strfind(folded, 'smelt ') or strfind(folded, '^bolt of ') then
 					process = process or row
-				elseif single then
-					only = row
 				end
 			end
 		end
 	end
-	local picked = named or process or only
+	local picked = named or process
 	if not picked then return end
 	if vendor_buy(id) then
 		local folded = fold_name(picked.name)
@@ -717,7 +716,7 @@ function aux.handle.INIT_UI()
 
 	local body = gui.panel(content)
 	body:SetPoint('TOPLEFT', top, 'BOTTOMLEFT', 0, -2.5)
-	body:SetPoint('BOTTOMRIGHT', 0, 0)
+	body:SetPoint('BOTTOMRIGHT', 0, 40)
 
 	shop_listing = listing.new(body)
 	shop_listing:SetColInfo(MATCH_COLUMNS)
@@ -736,14 +735,16 @@ function aux.handle.INIT_UI()
 	shop_listing:SetHandler('OnLeave', function() GameTooltip:Hide() end)
 
 	shop_status = gui.label(shop_frame, gui.font_size.small)
-	shop_status:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 0, -8)
-	shop_status:SetWidth(250)
+	shop_status:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 0, -4)
+	shop_status:SetWidth(520)
 	shop_status:SetJustifyH('LEFT')
 	shop_status:SetText('Search a recipe or item. Shift-click a link to fill the box.')
 
 	shop_buy = gui.button(shop_frame)
-	shop_buy:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 255, -6)
-	gui.set_size(shop_buy, 110, 24)
+	shop_buy:SetPoint('LEFT', shop_status, 'RIGHT', 16, 0)
+	shop_buy:SetPoint('TOP', aux.frame.content, 'BOTTOM', 0, -2)
+	gui.set_size(shop_buy, 140, 26)
+	shop_buy:SetFrameLevel(shop_frame:GetFrameLevel() + 20)
 	shop_buy:SetText('Buy missing')
 	shop_buy:SetScript('OnClick', function()
 		if buying or not shop_target then return end

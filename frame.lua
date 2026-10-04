@@ -15,7 +15,24 @@ SKILL_COLORS = {
 	trivial = {'gray', .5, .5, .5},
 }
 
+AUX_WIDTH, AUX_HEIGHT = 768, 447
+
+function use_vendorcraft_window(on)
+	local frame = aux.frame
+	if not frame then return end
+	local w = on and floor(AUX_WIDTH * 1.5) or AUX_WIDTH
+	local h = on and floor(AUX_HEIGHT * 1.5) or AUX_HEIGHT
+	gui.set_size(frame, w, h)
+	local border = _G.aux_frameBorder
+	if border then
+		border:SetWidth(w + 24)
+		border:SetHeight(h + 24)
+	end
+	if on and layout_vendor_panels then layout_vendor_panels() end
+end
+
 function tab.OPEN()
+	use_vendorcraft_window(true)
 	frame:Show()
 	load_book()
 	if plan_stale or not results then
@@ -27,6 +44,7 @@ end
 
 function tab.CLOSE()
 	frame:Hide()
+	use_vendorcraft_window(false)
 end
 
 function colored_item_name(id, fallback)
@@ -550,25 +568,27 @@ function aux.handle.INIT_UI()
 	frame.content:SetPoint('BOTTOMLEFT', aux.frame.content, 'BOTTOMLEFT', 0, 0)
 	frame.content:SetPoint('BOTTOMRIGHT', aux.frame.content, 'BOTTOMRIGHT', 0, 0)
 
-	-- aux's window is a fixed 768x447; this is the height between the tab
-	-- strip and the bottom button row. Listings size their rows from it.
-	local content_height = 447 - 8 - 35
-	local top_height, results_height = 40, 222
-
 	local top = gui.panel(frame.content)
 	top:SetPoint('TOPLEFT', 0, 0)
 	top:SetPoint('TOPRIGHT', 0, 0)
-	top:SetHeight(top_height)
+	top:SetHeight(48)
 
 	local results_panel = gui.panel(frame.content)
 	results_panel:SetPoint('TOPLEFT', top, 'BOTTOMLEFT', 0, -pad)
 	results_panel:SetPoint('TOPRIGHT', top, 'BOTTOMRIGHT', 0, -pad)
-	results_panel:SetHeight(results_height)
+	results_panel:SetHeight(300)
 
 	local details_panel = gui.panel(frame.content)
 	details_panel:SetPoint('TOPLEFT', results_panel, 'BOTTOMLEFT', 0, -pad)
 	details_panel:SetPoint('TOPRIGHT', results_panel, 'BOTTOMRIGHT', 0, -pad)
-	details_panel:SetHeight(content_height - top_height - results_height - 2 * pad)
+	details_panel:SetPoint('BOTTOMLEFT', frame.content, 'BOTTOMLEFT', 0, 36)
+	details_panel:SetPoint('BOTTOMRIGHT', frame.content, 'BOTTOMRIGHT', 0, 36)
+
+	function layout_vendor_panels()
+		local height = aux.frame:GetHeight() - 8 - 42
+		local results_h = floor((height - 48) * 0.52)
+		results_panel:SetHeight(max(160, results_h))
+	end
 
 	do
 		local btn = gui.button(top)
@@ -717,7 +737,7 @@ function aux.handle.INIT_UI()
 	-- (about 150px from the right edge).
 	do
 		status_bar = gui.status_bar(frame)
-		status_bar:SetWidth(165)
+		status_bar:SetWidth(280)
 		status_bar:SetHeight(25)
 		status_bar:SetPoint('TOPLEFT', aux.frame.content, 'BOTTOMLEFT', 0, -6)
 		status_bar:update_status(1, 1)
@@ -749,7 +769,7 @@ function aux.handle.INIT_UI()
 		local btn = gui.button(frame)
 		btn:SetPoint('LEFT', craft_box, 'RIGHT', 36, 0)
 		btn:SetPoint('TOP', status_bar, 'TOP', 0, 0)
-		gui.set_size(btn, 52, 24)
+		gui.set_size(btn, 70, 26)
 		btn:SetText('Match')
 		btn:SetScript('OnClick', function()
 			if selected_plan then match_owned_crafts(selected_plan) end
@@ -766,7 +786,7 @@ function aux.handle.INIT_UI()
 	do
 		local btn = gui.button(frame)
 		btn:SetPoint('TOPLEFT', match_button, 'TOPRIGHT', 5, 0)
-		gui.set_size(btn, 95, 24)
+		gui.set_size(btn, 120, 26)
 		btn:SetText('Buy selected')
 		btn:SetScript('OnClick', function()
 			apply_craft_box()
@@ -777,7 +797,7 @@ function aux.handle.INIT_UI()
 	do
 		local btn = gui.button(frame)
 		btn:SetPoint('TOPLEFT', buy_button, 'TOPRIGHT', 5, 0)
-		gui.set_size(btn, 65, 24)
+		gui.set_size(btn, 80, 26)
 		btn:SetText('Buy all')
 		btn:SetScript('OnClick', function() request_buy(results) end)
 		buy_all_button = btn
@@ -785,7 +805,7 @@ function aux.handle.INIT_UI()
 	do
 		local btn = gui.button(frame)
 		btn:SetPoint('TOPLEFT', buy_all_button, 'TOPRIGHT', 5, 0)
-		gui.set_size(btn, 65, 24)
+		gui.set_size(btn, 80, 26)
 		btn:SetText('Refresh')
 		btn:SetScript('OnClick', function() request_plan() end)
 		refresh_button = btn
@@ -793,11 +813,12 @@ function aux.handle.INIT_UI()
 	do
 		local btn = gui.button(frame)
 		btn:SetPoint('TOPLEFT', refresh_button, 'TOPRIGHT', 5, 0)
-		gui.set_size(btn, 110, 24)
+		gui.set_size(btn, 130, 26)
 		btn:SetText('Other recipes')
 		btn:SetScript('OnClick', switch_view)
 		view_button = btn
 	end
+	layout_vendor_panels()
 end
 
 function aux.handle.LOAD()

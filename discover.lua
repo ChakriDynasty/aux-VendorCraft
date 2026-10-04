@@ -157,6 +157,38 @@ function reset_atlas_cache()
 	shop_atlas_by_item = nil
 end
 
+-- True when this spell is the thing you buy, or the smelt/bolt that makes it.
+-- A different craft that only shares the item id is not.
+function recipe_makes_item(name, id)
+	if not name or not id or is_leather_grade(id) then return end
+	local folded = fold_name(name)
+	if strfind(folded, '^transmute') or recipe_on_cooldown(name) then return end
+	if strfind(folded, 'smelt ') or strfind(folded, '^bolt of ') then return true end
+	local item = item_name(id)
+	return item and not strfind(item, '^item:') and names_equal(name, item)
+end
+
+-- CraftTree reagents for this item, when the spell name matches the recipe
+-- or the item. This replaces a profession-window dump that grabbed the
+-- wrong reagent links.
+function craft_reagents(name, product)
+	local db = _G.CraftTreeDB
+	local rows = db and product and db[product]
+	if not rows then return end
+	for i = 1, getn(rows) do
+		local row = rows[i]
+		if row.reagents and getn(row.reagents) > 0 and (names_equal(row.name, name) or names_equal(row.name, item_name(product))) then
+			local reagents = {}
+			for j = 1, getn(row.reagents) do
+				tinsert(reagents, {id = row.reagents[j][1], count = row.reagents[j][2] or 1})
+			end
+			if getn(reagents) > 0 then
+				return reagents, row.yield or 1
+			end
+		end
+	end
+end
+
 -- The whole database, keyed like unknown_recipes. Nil when Atlas-CFM is absent.
 function atlas_recipe_list()
 	if atlas_recipes then return atlas_recipes end

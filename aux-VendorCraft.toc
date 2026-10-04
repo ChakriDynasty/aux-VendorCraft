@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: aux |cff66ccffVendorCraft|r
 ## Notes: aux tabs: vendor crafts, AH flips below vendor price, and search-and-buy mats
-## Version: 0.3.9
+## Version: 0.4.1
 ## Dependencies: aux-addon
 ## OptionalDeps: Atlas-CFM, Bagshui, ShaguTweaks, pfUI, pfQuest, pfQuest-turtle, CraftTree
 ## SavedVariables: AuxVendorCraftDB

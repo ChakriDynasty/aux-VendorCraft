@@ -27,19 +27,35 @@ end
 -- Item id -> {name, recipe, known} for every recipe that can make it.
 -- Known recipes win over database ones; cooldown recipes and leather-grade
 -- upgrades are never used as a step in a tree.
+function store_maker(makers, name, recipe, known)
+	if not recipe or not recipe.product or not recipe_makes_item(name, recipe.product) then return end
+	local reagents, yield = craft_reagents(name, recipe.product)
+	if reagents then
+		local copy = {
+			product = recipe.product,
+			reagents = reagents,
+			made = yield or recipe.made,
+			prof = recipe.prof,
+			skill = recipe.skill,
+			spell = recipe.spell,
+			name = name,
+		}
+		recipe = copy
+	end
+	local old = makers[recipe.product]
+	if old and old.known and not known then return end
+	makers[recipe.product] = {name = name, recipe = recipe, known = known}
+end
+
 function build_makers(allow_database)
 	local makers = {}
 	if allow_database then
 		for _, recipe in unknown_recipes() or EMPTY do
-			if recipe.product and not is_leather_grade(recipe.product) and not recipe_on_cooldown(recipe.name, recipe) and not makers[recipe.product] then
-				makers[recipe.product] = {name = recipe.name, recipe = recipe, known = false}
-			end
+			store_maker(makers, recipe.name, recipe, false)
 		end
 	end
 	for name, recipe in character.recipes do
-		if recipe.product and not is_leather_grade(recipe.product) and not recipe_on_cooldown(name, recipe) then
-			makers[recipe.product] = {name = name, recipe = recipe, known = true}
-		end
+		store_maker(makers, name, recipe, true)
 	end
 	return makers
 end

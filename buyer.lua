@@ -415,7 +415,16 @@ function start_buying()
 	pending_plans = nil
 	buy_prompt = nil
 	cancel_plan()
-	if not plans or scanning or buying then return end
+	if scanning then
+		suppress_plan = true
+		stop_scan()
+		scanning = false
+		suppress_plan = nil
+	end
+	if not plans or buying then
+		if not plans then say('Nothing was queued to buy.') end
+		return
+	end
 	buying = true
 	job = {
 		plans = plans,
@@ -477,6 +486,12 @@ function start_rounds(plan)
 end
 
 function want_after_round(line, r)
+	-- A Mats list is already the full quantity. Buy every auction in one pass
+	-- instead of splitting it across one round per craft, which skips stacks
+	-- smaller than the craft count.
+	if job.plan.shop then
+		return r >= 1 and line.total or 0
+	end
 	local n = job.plan.crafts
 	if not n or n < 1 then return line.total end
 	return floor(line.total * r / n)
@@ -505,8 +520,9 @@ end
 
 function next_round()
 	job.round = job.round + 1
-	if job.round > job.plan.crafts then
-		job.complete_crafts = job.plan.crafts
+	local rounds = job.plan.shop and 1 or job.plan.crafts
+	if job.round > rounds then
+		job.complete_crafts = job.plan.shop and (job.plan.shop_qty or 1) or job.plan.crafts
 		return finish_plan()
 	end
 	job.step = 0
