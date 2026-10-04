@@ -29,6 +29,9 @@ function use_vendorcraft_window(on)
 		border:SetHeight(h + 24)
 	end
 	if on and layout_vendor_panels then layout_vendor_panels() end
+	if version_label then
+		if on then version_label:Show() else version_label:Hide() end
+	end
 end
 
 function tab.OPEN()
@@ -574,6 +577,16 @@ end
 
 function aux.handle.INIT_UI()
 	local pad = gui.is_blizzard() and 6.5 or 2.5
+
+	local version_frame = CreateFrame('Frame', nil, aux.frame)
+	version_frame:SetPoint('TOP', aux.frame, 'TOP', 0, -6)
+	version_frame:SetWidth(220)
+	version_frame:SetHeight(18)
+	version_frame:SetFrameLevel((aux.frame:GetFrameLevel() or 1) + 40)
+	version_label = gui.label(version_frame, gui.font_size.medium)
+	version_label:SetPoint('CENTER', version_frame, 'CENTER', 0, 0)
+	version_label:SetText('VendorCraft v' .. VERSION)
+	version_label:Hide()
 
 	frame = CreateFrame('Frame', nil, aux.frame)
 	frame:SetAllPoints()
