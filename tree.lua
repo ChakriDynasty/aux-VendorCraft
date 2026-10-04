@@ -49,13 +49,41 @@ end
 
 function build_makers(allow_database)
 	local makers = {}
+	-- Only CraftTree smelts and bolts. A learned recipe whose item link was
+	-- wrong used to replace the real bar or bolt and pull in unrelated mats.
+	local db = _G.CraftTreeDB
+	if db then
+		for itemId, rows in db do
+			if type(itemId) == 'number' and not is_leather_grade(itemId) then
+				for i = 1, getn(rows) do
+					local row = rows[i]
+					local folded = fold_name(row.name)
+					if row.reagents and getn(row.reagents) > 0 and (strfind(folded, 'smelt ') or strfind(folded, '^bolt of ')) then
+						local reagents = {}
+						for j = 1, getn(row.reagents) do
+							tinsert(reagents, {id = row.reagents[j][1], count = row.reagents[j][2] or 1})
+						end
+						makers[itemId] = {
+							name = row.name,
+							known = character.recipes[row.name] and true or false,
+							recipe = {
+								product = itemId,
+								reagents = reagents,
+								made = row.yield or 1,
+								name = row.name,
+								spell = row.spell,
+							},
+						}
+					end
+				end
+			end
+		end
+		return makers
+	end
 	if allow_database then
 		for _, recipe in unknown_recipes() or EMPTY do
 			store_maker(makers, recipe.name, recipe, false)
 		end
-	end
-	for name, recipe in character.recipes do
-		store_maker(makers, name, recipe, true)
 	end
 	return makers
 end

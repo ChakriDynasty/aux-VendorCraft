@@ -168,22 +168,80 @@ function recipe_makes_item(name, id)
 	return item and not strfind(item, '^item:') and names_equal(name, item)
 end
 
--- CraftTree reagents for this item, when the spell name matches the recipe
--- or the item. This replaces a profession-window dump that grabbed the
--- wrong reagent links.
+-- Spell name -> CraftTree row. Built once from the item-id tables, so a
+-- bad profession-window item id cannot point a recipe at another craft.
+function crafttree_index()
+	if crafttree_by_name then return crafttree_by_name end
+	crafttree_by_name = {}
+	local db = _G.CraftTreeDB
+	if not db then return crafttree_by_name end
+	for itemId, rows in db do
+		if type(itemId) == 'number' and type(rows) == 'table' then
+			for i = 1, getn(rows) do
+				local row = rows[i]
+				if row.name and row.reagents and getn(row.reagents) > 0 then
+					local key = fold_name(row.name)
+					if not crafttree_by_name[key] then
+						local reagents = {}
+						for j = 1, getn(row.reagents) do
+							tinsert(reagents, {id = row.reagents[j][1], count = row.reagents[j][2] or 1})
+						end
+						crafttree_by_name[key] = {
+							name = row.name,
+							product = itemId,
+							spell = row.spell,
+							yield = row.yield or 1,
+							reagents = reagents,
+						}
+					end
+				end
+			end
+		end
+	end
+	return crafttree_by_name
+end
+
+function copy_reagents(list)
+	local out = {}
+	for i = 1, getn(list or EMPTY) do
+		local reagent = list[i]
+		tinsert(out, {id = reagent.id or reagent[1], count = reagent.count or reagent[2] or 1, name = reagent.name})
+	end
+	return out
+end
+
+function craft_by_name(name)
+	if not name then return end
+	local found = crafttree_index()[fold_name(name)]
+	if not found then return end
+	return {
+		name = found.name,
+		product = found.product,
+		spell = found.spell,
+		yield = found.yield,
+		reagents = copy_reagents(found.reagents),
+	}
+end
+
+-- CraftTree reagents for the spell the player clicked. The product id is
+-- only a fallback when the spell name is not in CraftTree.
 function craft_reagents(name, product)
+	local found = craft_by_name(name)
+	if found then
+		return found.reagents, found.yield, found.product
+	end
 	local db = _G.CraftTreeDB
 	local rows = db and product and db[product]
 	if not rows then return end
 	for i = 1, getn(rows) do
 		local row = rows[i]
-		if row.reagents and getn(row.reagents) > 0 and (names_equal(row.name, name) or names_equal(row.name, item_name(product))) then
+		if row.reagents and getn(row.reagents) > 0 and names_equal(row.name, item_name(product)) then
 			local reagents = {}
 			for j = 1, getn(row.reagents) do
 				tinsert(reagents, {id = row.reagents[j][1], count = row.reagents[j][2] or 1})
 			end
 			if getn(reagents) > 0 then
-				return reagents, row.yield or 1
+				return reagents, row.yield or 1, product
 			end
 		end
 	end

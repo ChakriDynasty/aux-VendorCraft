@@ -203,10 +203,10 @@ function eval_recipe(name, recipe, sup, limit)
 	if value <= 0 then
 		return nil, 'vendors do not buy ' .. item_name(recipe.product, name), 'novendor'
 	end
-	local fixed, yield_fix = craft_reagents(name, recipe.product)
+	local fixed, yield_fix, product_fix = craft_reagents(name, recipe.product)
 	if fixed then
 		recipe = {
-			product = recipe.product,
+			product = product_fix or recipe.product,
 			reagents = fixed,
 			made = yield_fix or recipe.made,
 			prof = recipe.prof,

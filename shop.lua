@@ -316,14 +316,10 @@ function expand_shop(sup, target, qty)
 	local entries, path = {}, {}
 	qty = qty or 1
 	if target.kind == 'recipe' and target.recipe then
-		local product = target.recipe.product or target.id
-		local checked = product and shop_pick_recipe(product)
-		local reagents = target.recipe.reagents
-		local yield = target.recipe.made or target.recipe.yield or 1
-		if checked and (names_equal(checked.name, target.name) or names_equal(checked.name, item_name(product))) then
-			reagents = checked.reagents
-			yield = checked.yield or checked.made or 1
-		end
+		local found = craft_by_name(target.name)
+		local product = found and found.product or target.recipe.product or target.id
+		local reagents = found and found.reagents or target.recipe.reagents
+		local yield = found and found.yield or target.recipe.made or target.recipe.yield or 1
 		if product then path[product] = true end
 		local batches = ceil(qty / yield)
 		for i = 1, getn(reagents or EMPTY) do
@@ -569,7 +565,7 @@ function show_shop_matches(hits)
 			quote = quote,
 		})
 	end
-	shop_listing:SetData(rows)
+	show_rows(shop_listing, rows)
 	shop_market_cache = nil
 	if shop_status then
 		shop_status:SetText(getn(hits) == 0 and 'No recipe or item matches. Shift-click an item or type a name.' or format('%d matches — Mats is the cost of the basic materials, not the direct reagents.', getn(hits)))
@@ -609,7 +605,7 @@ function open_shop_target(target)
 			reagent = r,
 		})
 	end)
-	shop_listing:SetData(rows)
+	show_rows(shop_listing, rows)
 	set_shop_quote({
 		units = shop_plan.yield,
 		value = shop_plan.value,

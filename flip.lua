@@ -123,7 +123,7 @@ function update_flip_results()
 		})
 	end
 	selected_flip = selection or flip_rows[1]
-	flip_listing:SetData(data)
+	show_rows(flip_listing, data)
 	if flip_status then
 		if getn(flip_rows) == 0 then
 			flip_status:SetText(book_meta and book_meta.scanned and 'No auctions cheaper than vendor in this scan.' or 'Scan the auction house on the Vendor tab first.')

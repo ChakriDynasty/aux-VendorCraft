@@ -120,6 +120,21 @@ function plan_row(plan)
 	return {name, crafts, money_text(plan.cash), vendor, profit, per_craft, count_text(plan.leftover, aux.color.orange)}
 end
 
+function show_rows(listing, rows)
+	if not listing then return end
+	local parent = listing:GetParent()
+	local height = parent and parent:GetHeight() or 0
+	if height > 40 then
+		listing.numRows = max(floor((height - 29) / 15), 1)
+	end
+	local scroll = listing.scrollFrame
+	if scroll then
+		scroll:SetVerticalScroll(0)
+		FauxScrollFrame_SetOffset(scroll, 0)
+	end
+	listing:SetData(rows)
+end
+
 function update_results()
 	local rows, selection, list = {}, nil, current_results()
 	for _, plan in list or EMPTY do
@@ -131,7 +146,7 @@ function update_results()
 		tinsert(rows, {cols = cols, plan = plan})
 	end
 	selected_plan = selection or list and list[1]
-	results_listing:SetData(rows)
+	show_rows(results_listing, rows)
 	update_details()
 	show_craft_box()
 	show_mat_box()
@@ -167,6 +182,8 @@ function update_details()
 	local rows = {}
 	local plan = selected_plan
 	local sup = current_supply()
+	local owned_mine, owned_alts = owned_snapshot()
+	local owned_mail = mail_counts()
 	each_node(plan and plan.reagents or EMPTY, function(reagent, depth)
 		local alts = 0
 		for _, n in sup and sup.alts[reagent.id] or EMPTY do
@@ -177,7 +194,7 @@ function update_details()
 			cols = {
 				{value = indent .. colored_item_name(reagent.id, reagent.name) .. gray(' x' .. reagent.q)},
 				{value = tostring(reagent.need)},
-				{value = count_text(reagent.owned + (reagent.reused or 0))},
+				{value = count_text(counted_owned(reagent.id, owned_mine, owned_alts, owned_mail))},
 				{value = owned_use_text(reagent.id)},
 				{value = reagent.ah_units > 0 and format('AH %d (%s)', reagent.ah_units, money_text(reagent.ah_cash)) or gray('-')},
 				{value = reagent.vendor > 0 and format('Vendor %d (%s)', reagent.vendor, money_text(reagent.vendor * (reagent.vendor_price or 0))) or gray('-')},
@@ -188,7 +205,7 @@ function update_details()
 			reagent = reagent,
 		})
 	end)
-	details_listing:SetData(rows)
+	show_rows(details_listing, rows)
 	if vendor_hint then
 		vendor_hint:SetText(vendor_hint_text(plan))
 	end
