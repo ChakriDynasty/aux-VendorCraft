@@ -31,8 +31,11 @@ function wrap_tooltip(name, fetch)
 	if not orig or wrapped_tips[name] == orig then return end
 	local function hooked(self, a, b)
 		remember_tip(fetch(a, b))
-		orig(self, a, b)
+		-- The paperdoll uses the return value. If it is missing, the slot
+		-- name ("Legs") replaces the item tooltip.
+		local r1, r2, r3 = orig(self, a, b)
 		remember_tip(fetch(a, b))
+		return r1, r2, r3
 	end
 	wrapped_tips[name] = hooked
 	GameTooltip[name] = hooked
