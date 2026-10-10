@@ -279,36 +279,8 @@ function shop_node(sup, id, per, need, depth, path, name)
 		cash = 0,
 		net = 0,
 	}
-	local recipe = shop_pick_recipe(id)
-	if missing <= 0 or not recipe or depth >= 8 or path[id] then
-		if missing > 0 then shop_buy_leaf(sup, node, missing) end
-		return node
-	end
-	local yield = recipe.yield or recipe.made or 1
-	local batches = ceil(missing / yield)
-	local children, cash = {}, 0
-	path[id] = true
-	for i = 1, getn(recipe.reagents or EMPTY) do
-		local rid, rcount = shop_reagent_parts(recipe.reagents[i])
-		if rid then
-			local child = shop_node(sup, rid, rcount, batches * rcount, depth + 1, path, recipe.reagents[i].name)
-			tinsert(children, child)
-			cash = cash + (child.cash or 0)
-		end
-	end
-	path[id] = nil
-	node.cash = cash
-	node.net = use * node.salvage + cash
-	node.craft = {
-		name = recipe.name,
-		known = character and character.recipes and character.recipes[recipe.name] and true or false,
-		crafts = batches,
-		yield = yield,
-		units = batches * yield,
-		reagents = children,
-	}
-	node.spare = batches * yield - missing
-	node.leftover = node.spare
+	-- Buy this reagent itself. Do not open another recipe and buy its mats.
+	if missing > 0 then shop_buy_leaf(sup, node, missing) end
 	return node
 end
 
